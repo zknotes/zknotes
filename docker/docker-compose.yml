@@ -189,7 +189,7 @@ services:
   # Sets the bucket's CORS rule for the vault origin: the browser's presigned PUT/GET need it, and
   # Garage has it per bucket only. It waits for Garage (which has no shell for a healthcheck).
   garage_init:
-    image: amazon/aws-cli:2.31.11
+    image: amazon/aws-cli:2.37.12
     profiles: [storage]
     depends_on:
       garage:
