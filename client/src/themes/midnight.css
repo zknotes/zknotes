@@ -1,0 +1,33 @@
+/* ===========================================================================
+   THEME: midnight — a deep indigo/navy dark (accent: indigo/purple)
+   Clearly distinct from dark — the base colours carry a visible indigo tint.
+
+   SURFACE MAP — it inherits everything from dark and overrides only:
+     App background      → --surface-app     (#07080f)
+     Sidebar / panels    → --surface-panel   (#0d1030)
+     Cards / raised      → --surface-raised  (#151838)
+     Secondary text      → --text-sub        (#bfc6ce)
+     Muted text          → --text-muted      (#8f98a5)
+     Dim text            → --text-dim        (#616d7e)
+     Line / separator    → --stroke          (#232756)
+     Subtle line         → --stroke-soft     (#151838)
+     Accent              → --accent-color    (oklch indigo/purple)
+   =========================================================================== */
+
+.dark.theme-midnight {
+    --surface-app: #07080f;
+    --surface-panel: #0d1030;
+    --surface-raised: #151838;
+    --text-sub: #bfc6ce;
+    --text-muted: #8f98a5;
+    --text-dim: #616d7e;
+    --stroke: #232756;
+    --stroke-soft: #151838;
+    --accent-color: oklch(0.72 0.18 270);
+    --accent-subtle: oklch(0.28 0.08 270);
+    --accent-glow: oklch(0.72 0.18 270 / 0.18);
+    --accent-fg: oklch(0.82 0.15 270);
+
+    --scroll-thumb: #232756;
+    --scroll-thumb-hover: #2e3370;
+}

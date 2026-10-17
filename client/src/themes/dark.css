@@ -1,0 +1,57 @@
+/* ===========================================================================
+   THEME: dark — a deep slate dark (the default dark theme)
+
+   SURFACE MAP — where each variable goes:
+     App background      → --surface-app
+     Sidebar / panels    → --surface-panel
+     Cards / raised      → --surface-raised
+     Row hover           → --row-hover
+     Primary text        → --text
+     Secondary text      → --text-sub
+     Muted text          → --text-muted
+     Dim text            → --text-dim
+     Line / separator    → --stroke
+     Subtle line         → --stroke-soft
+     Accent              → --accent-color
+     Accent background   → --accent-subtle
+     Accent text         → --accent-fg
+     Floating overlay    → --float-bg
+   =========================================================================== */
+
+@layer base {
+    .dark {
+        /* ZKnotes design tokens — dark */
+        --surface-app: #020617;
+        --surface-panel: #0f172a;
+        --surface-raised: #1e293b;
+        --stroke: #1e293b;
+        --stroke-soft: #0f172a;
+        --text: #f1f5f9;
+        --text-sub: #c3cad2;
+        --text-muted: #979fab;
+        --text-dim: #6c7787;
+        --accent-color: oklch(0.74 0.16 165);
+        --accent-subtle: oklch(0.3 0.08 165);
+        --accent-glow: oklch(0.74 0.16 165 / 0.15);
+        --accent-fg: oklch(0.85 0.14 165);
+
+        --scroll-thumb: #1e293b;
+        --scroll-thumb-hover: #334155;
+        --float-bg: rgba(15, 23, 42, 0.88);
+        --float-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+        --menu-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        --row-hover: rgba(255, 255, 255, 0.03);
+        --grid-dot: rgba(148, 163, 184, 0.04);
+
+        /* Semantic colors for buttons and states */
+        --danger: #ef4444;
+        --warning: #f59e0b;
+        --info: #3b82f6;
+        --success: #22c55e;
+        --warning-on: #1a1205;
+
+        /* The semantic indicators (star, the dirty/pending dot) */
+        --star-color: #fcd34d;
+        --dirty-color: #38bdf8;
+    }
+}

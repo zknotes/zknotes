@@ -1,0 +1,52 @@
+/* ===========================================================================
+   THEME: warm — the Apple Notes cream/yellow
+
+   SURFACE MAP — where each variable goes:
+     App background      → --surface-app     (#f5f1e6)
+     Sidebar / panels    → --surface-panel   (#fbf8ee)
+     Cards / raised      → --surface-raised  (#ede7d3)
+     Row hover           → --row-hover
+     Primary text        → --text            (inherited from light)
+     Secondary text      → --text-sub        (#313845)
+     Muted text          → --text-muted      (#555a66)
+     Dim text            → --text-dim        (#7a7f89)
+     Line / separator    → --stroke          (#ddd7c4)
+     Subtle line         → --stroke-soft     (#ede7d3)
+     Floating overlay    → --float-bg
+   =========================================================================== */
+
+:root.theme-warm {
+    --surface-app: #f5f1e6;
+    --surface-panel: #fbf8ee;
+    --surface-raised: #ede7d3;
+    --text-sub: #313845;
+    --text-muted: #555a66;
+    --text-dim: #7a7f89;
+    --stroke: #ddd7c4;
+    --stroke-soft: #ede7d3;
+
+    --accent-color: oklch(0.55 0.18 55);
+    --accent-subtle: oklch(0.92 0.05 55);
+    --accent-glow: oklch(0.55 0.18 55 / 0.15);
+    --accent-fg: oklch(0.45 0.15 55);
+
+    --float-bg: rgba(251, 248, 238, 0.92);
+    --float-shadow: 0 12px 32px rgba(80, 60, 20, 0.12);
+    --menu-shadow: 0 10px 30px rgba(80, 60, 20, 0.14);
+    --row-hover: rgba(100, 80, 20, 0.05);
+    --grid-dot: rgba(139, 118, 60, 0.07);
+    --scroll-thumb: #c8bea8;
+    --scroll-thumb-hover: #a89d8a;
+
+    --color-amber-900: #fde68a;
+    --color-amber-500: #d97706;
+    --color-amber-400: #d97706;
+    --color-amber-300: #d97706;
+    --color-rose-400: #e11d48;
+    --color-rose-300: #e11d48;
+    --color-sky-400: #0284c7;
+    --color-violet-400: #7c3aed;
+    --color-emerald-300: #047857;
+    --color-emerald-400: #059669;
+    --color-emerald-500: #059669;
+}

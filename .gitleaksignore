@@ -1,0 +1,8 @@
+# Reviewed gitleaks findings that are not secrets. Format: file:rule-id:line.
+
+# base64 of the word "vaultkey", standing in for a wrapped key in a mocked API reply.
+client/src/lib/core/services/auth-service.test.ts:generic-api-key:66
+client/src/lib/core/services/auth-service.test.ts:generic-api-key:88
+
+# Known-answer vector: the Auth Key derived from the documented test password and salt.
+shared/src/cryptography.test.ts:generic-api-key:425

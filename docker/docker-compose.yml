@@ -1,0 +1,236 @@
+# The project name decides the container and volume names (zknotes_pgdata, …). Pinned so they do not
+# follow the directory this file happens to be in: a different name means new, empty volumes.
+name: zknotes
+
+services:
+  # ── PostgreSQL 18 ─────────────────────────────────────────────────────────────
+  # Internal only — it is not exposed to the internet; the API connects through DATABASE_URL.
+  db:
+    image: postgres:18.4-bookworm
+    environment:
+      POSTGRES_USER: zknotes
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: zknotes
+    volumes:
+      # PG 18+ requires the mount at /var/lib/postgresql (not /data) — the subdirectory is created automatically.
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zknotes"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [backend]
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  # ── API (Bun) ─────────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+      args:
+        APP_COMMIT: ${APP_COMMIT:-dev}
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://zknotes:${POSTGRES_PASSWORD}@db:5432/zknotes
+      NODE_ENV: production
+      PORT: "3000"
+      # Without this, Fastify defaults to 127.0.0.1 (server/index.ts) — unreachable from the other
+      # containers (Caddy's reverse_proxy api:3000) and from the host (e.g. through an SSH tunnel).
+      HOST: "0.0.0.0"
+      # The API believes X-Forwarded-For only from peers in this list. It defaults to the `edge`
+      # subnet below, which only Caddy (and in an extended deployment, other services that forward a
+      # client address) shares with the API. Without it req.ip would be Caddy's address and every
+      # per-IP rate limit one global bucket. A hop count ("1") or "true" is refused at startup.
+      TRUST_PROXY: ${TRUST_PROXY:-${EDGE_SUBNET:-172.30.250.0/24}}
+      # The S3-compatible object storage — set it in .env (required for file uploads):
+      # S3_ENDPOINT, S3_REGION, S3_BUCKET, S3_ACCESS_KEY, S3_SECRET_KEY
+    # The host's resolv.conf is a systemd-resolved stub (127.0.0.53) — unreachable from a container
+    # under rootless Docker (it is not rewritten to the real upstream the way it is under a rootful
+    # daemon). So the outgoing calls (S3) use explicit resolvers; point DNS_RESOLVER_1/2 at your own
+    # (a split-horizon or filtering resolver, say) if public ones are not wanted.
+    dns:
+      - ${DNS_RESOLVER_1:-1.1.1.1}
+      - ${DNS_RESOLVER_2:-9.9.9.9}
+    # `backend` reaches the database; `edge` is the only network the API shares with Caddy, so every
+    # proxied request arrives from an address TRUST_PROXY lists.
+    networks: [backend, edge]
+    ports:
+      # 127.0.0.1: localhost on the host only (reach it through an SSH tunnel).
+      # NEVER "3000:3000" without the prefix — that would publish the port on every interface and slip
+      # past ufw (Docker writes its own iptables rules outside the INPUT chain).
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  # ── Web (nginx serving static SvelteKit build) ─────────────────────────────
+  web:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.web
+      args:
+        # VITE_API_URL is NOT set — the API is same-origin (Caddy path routing), so the SPA makes
+        # relative calls exactly as it does in dev (API_BASE = "").
+        # PUBLIC_WWW_URL is NOT passed through: the public site's address is a **runtime** value from
+        # `/instance-config`. A build must have no instance-specific input.
+        APP_COMMIT: ${APP_COMMIT:-dev}
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      # The nginx template's connect-src: the presigned S3 PUT/GET (the same origin as the API's S3_ENDPOINT).
+      CSP_CONNECT_EXTRA: ${S3_ENDPOINT:-}
+    expose:
+      - "8080"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── Caddy (reverse proxy, automatic HTTPS) ───────────────────────────────
+  caddy:
+    image: caddy:2.9-alpine
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    # The host's resolv.conf is a systemd-resolved stub (127.0.0.53) — unreachable from a container
+    # under rootless Docker. Without this, ACME (Let's Encrypt) cannot resolve
+    # acme-v02.api.letsencrypt.org. DNS_RESOLVER_1/2 replace the public defaults.
+    dns:
+      - ${DNS_RESOLVER_1:-1.1.1.1}
+      - ${DNS_RESOLVER_2:-9.9.9.9}
+    # `default` reaches the web container (and the built-in storage), `edge` the API.
+    networks:
+      default: {}
+      edge:
+        # Inside Docker the storage domain names Caddy itself, so the API reaches the built-in
+        # storage through the same address and certificate the browser uses, without a round trip
+        # through the server's public IP. Unused (a name nothing asks for) with external storage.
+        aliases:
+          - ${STORAGE_DOMAIN:-storage.invalid}
+    # The CSP is enforced by web/nginx (build-time script hashes + the S3 connect-src), not by Caddy.
+    # No 443/udp (HTTP/3): rootless Docker does not pass a UDP client's address through, so every
+    # HTTP/3 visitor would share one address in the API's per-IP limits. The Caddyfile turns h3 off.
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # The vault's domain — without it a self-hoster would get ours. Caddy reads {$APP_DOMAIN}.
+      APP_DOMAIN: ${APP_DOMAIN:-app.localhost}
+      # The built-in storage's domain, for docker/sites/storage.caddy (setup.sh writes it).
+      STORAGE_DOMAIN: ${STORAGE_DOMAIN:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Extra sites, imported by the Caddyfile: setup.sh puts the built-in storage's block here.
+      - ./sites:/etc/caddy/sites:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    # An extended deployment adds its other origins through an override of its own.
+    depends_on:
+      - api
+      - web
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── Built-in object storage (Garage) — the `storage` profile ──────────────
+  # Only with COMPOSE_PROFILES=storage in .env (setup.sh sets it when you choose the built-in
+  # storage); with your own S3 provider these two services do not start. Garage serves the S3 API on
+  # the internal network; Caddy publishes it on STORAGE_DOMAIN (docker/sites/storage.caddy), which is
+  # also S3_ENDPOINT, because browsers upload to it directly.
+  garage:
+    image: dxflrs/garage:v2.4.1
+    profiles: [storage]
+    # --default-bucket / --default-access-key: Garage creates S3_BUCKET and the S3_ACCESS_KEY /
+    # S3_SECRET_KEY pair on start, so nothing has to be set up by hand.
+    command: /garage -c /etc/garage.toml server --single-node --default-bucket --default-access-key
+    environment:
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:-}
+      GARAGE_DEFAULT_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+      GARAGE_DEFAULT_SECRET_KEY: ${S3_SECRET_KEY:-}
+      GARAGE_DEFAULT_BUCKET: ${S3_BUCKET:-zknotes}
+    volumes:
+      - ./garage.toml:/etc/garage.toml:ro
+      - garage_data:/data
+    networks: [default]
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Sets the bucket's CORS rule for the vault origin: the browser's presigned PUT/GET need it, and
+  # Garage has it per bucket only. It waits for Garage (which has no shell for a healthcheck).
+  garage_init:
+    image: amazon/aws-cli:2.31.11
+    profiles: [storage]
+    depends_on:
+      garage:
+        condition: service_started
+    environment:
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY:-}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY:-}
+      AWS_DEFAULT_REGION: ${S3_REGION:-us-east-1}
+      S3_BUCKET: ${S3_BUCKET:-zknotes}
+      VAULT_ORIGIN: https://${APP_DOMAIN:-app.localhost}
+    entrypoint: >
+      /bin/sh -c '
+      printf "{\"CORSRules\":[{\"AllowedOrigins\":[\"%s\"],\"AllowedMethods\":[\"GET\",\"PUT\",\"HEAD\"],\"AllowedHeaders\":[\"*\"],\"MaxAgeSeconds\":3600}]}" "$$VAULT_ORIGIN" > /tmp/cors.json &&
+      for i in $$(seq 1 60); do
+      aws --endpoint-url http://garage:3900 s3api put-bucket-cors --bucket "$$S3_BUCKET" --cors-configuration file:///tmp/cors.json && break;
+      sleep 1;
+      done &&
+      echo "storage bucket $$S3_BUCKET: CORS rule for $$VAULT_ORIGIN"
+      '
+    networks: [default]
+    restart: "no"
+    logging:
+      driver: json-file
+      options:
+        max-size: "1m"
+        max-file: "1"
+
+networks:
+  # The API and the database only; nothing that faces the internet joins it.
+  backend: {}
+  # The API and every service that forwards a client address to it: Caddy here, and whatever an
+  # extended deployment adds. The API trusts X-Forwarded-For from this subnet (TRUST_PROXY), so treat
+  # anything on it as able to choose the client address the API records. Change EDGE_SUBNET if it
+  # clashes with a network on your host.
+  edge:
+    ipam:
+      config:
+        - subnet: ${EDGE_SUBNET:-172.30.250.0/24}
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
+  garage_data:

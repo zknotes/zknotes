@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta name="text-scale" content="scale" />
+		<link rel="icon" href="%sveltekit.assets%/favicon.svg" type="image/svg+xml" />
+		<link rel="manifest" href="%sveltekit.assets%/manifest.webmanifest" />
+		<meta name="theme-color" content="#0a1628" />
+		<link rel="apple-touch-icon" href="%sveltekit.assets%/icon-192.png" />
+		<title>ZKnotes</title>
+		<!-- External: production CSP is script-src 'self' + build-time hashes only (no unsafe-inline). -->
+		<script src="%sveltekit.assets%/early-boot.js"></script>
+		%sveltekit.head%
+	</head>
+	<body data-sveltekit-preload-data="hover">
+		<div id="initial-loader" style="position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background-color: #0a1628; color: #f1f5f9; z-index: 99999; transition: opacity 0.4s ease;">
+			<div style="display: flex; flex-direction: column; align-items: center;">
+				<div style="width: 2.5rem; height: 2.5rem; border-radius: 9999px; border: 2px solid #10b981; border-top-color: transparent; animation: spin 1s linear infinite; margin-bottom: 1rem;"></div>
+				<p style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.6875rem; line-height: 1rem; text-transform: uppercase; letter-spacing: 0.18em; color: rgba(52, 211, 153, 0.8); margin: 0;">Loading ZKnotes…</p>
+			</div>
+			<style>
+				@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+				html.dark #initial-loader { background-color: #0a1628; }
+			</style>
+		</div>
+		<div style="display: contents">%sveltekit.body%</div>
+	</body>
+</html>

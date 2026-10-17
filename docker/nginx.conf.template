@@ -1,0 +1,35 @@
+server {
+    listen 8080;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # The immutable assets (Vite's hashed file names).
+    location /_app/immutable/ {
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        # The CSP has to be repeated here: nginx does not inherit add_header from a parent location.
+        # wasm-unsafe-eval: hash-wasm's Argon2id (the unlock) — a Wasm compile without a full
+        # 'unsafe-eval'.
+        add_header Content-Security-Policy "default-src 'none'; script-src 'self' 'wasm-unsafe-eval' {{CSP_SCRIPT_HASHES}}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' ${CSP_CONNECT_EXTRA}; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; media-src 'self' blob:" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "no-referrer" always;
+    }
+
+    # Every other route → the SPA shell (SvelteKit client-side routing).
+    location / {
+        try_files $uri $uri/ /index.html;
+        add_header Cache-Control "no-cache";
+        # Enforcing CSP: script-src hashes baked at image build (SvelteKit bootstrap
+        # inline script). connect-src storage origin from CSP_CONNECT_EXTRA (S3_ENDPOINT).
+        # wasm-unsafe-eval: hash-wasm Argon2id at unlock (WebAssembly.compile) — NOT 'unsafe-eval'.
+        # style-src 'unsafe-inline': Tailwind v4 / Svelte runtime styles (a deliberate choice).
+        # worker-src blob:: the SharedWorker in Chromium.
+        # img-src without https:: external images are blocked (a tracking-pixel defence).
+        add_header Content-Security-Policy "default-src 'none'; script-src 'self' 'wasm-unsafe-eval' {{CSP_SCRIPT_HASHES}}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' ${CSP_CONNECT_EXTRA}; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; media-src 'self' blob:" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        # no-referrer: the page address names the open note (/note/<id>, /files?file=<id>), and
+        # with any other policy every request the page makes would carry it into the access logs.
+        add_header Referrer-Policy "no-referrer" always;
+    }
+}

@@ -1,0 +1,24 @@
+# Config for the dev/test Garage containers in docker-compose.yml (garage, garage_test).
+# Mounted read-only into both — each container gets its own isolated /data volume, so sharing this
+# file is safe. Not used in production: docker/docker-compose.yml points at a real S3-compatible
+# provider instead (see docker/README.md).
+#
+# rpc_secret is a fixed dev-only placeholder, not a real secret — this store never leaves localhost
+# and never clusters with a second node, so there is nothing for it to protect.
+metadata_dir = "/data/meta"
+data_dir = "/data/data"
+db_engine = "sqlite"
+replication_factor = 1
+
+rpc_bind_addr = "[::]:3901"
+rpc_public_addr = "127.0.0.1:3901"
+rpc_secret = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+[s3_api]
+# Matches S3_REGION in server/.env.example — Garage rejects a presigned request signed for a
+# different region than this.
+s3_region = "us-east-1"
+api_bind_addr = "[::]:3900"
+
+[admin]
+api_bind_addr = "[::]:3903"

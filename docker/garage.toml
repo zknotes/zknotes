@@ -1,0 +1,15 @@
+# The built-in object storage (the `storage` profile in docker-compose.yml): a single Garage node.
+# No secret lives here — GARAGE_RPC_SECRET comes from docker/.env (setup.sh generates it), and the
+# bucket and access key from S3_BUCKET / S3_ACCESS_KEY / S3_SECRET_KEY.
+metadata_dir = "/data/meta"
+data_dir = "/data/data"
+db_engine = "sqlite"
+replication_factor = 1
+
+rpc_bind_addr = "[::]:3901"
+rpc_public_addr = "127.0.0.1:3901"
+
+[s3_api]
+# Must equal S3_REGION in docker/.env: Garage refuses a request signed for another region.
+s3_region = "us-east-1"
+api_bind_addr = "[::]:3900"

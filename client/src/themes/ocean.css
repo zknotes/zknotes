@@ -1,0 +1,54 @@
+/* ===========================================================================
+   THEME: ocean — a light teal/blue, unmistakably maritime
+
+   SURFACE MAP — where each variable goes:
+     App background      → --surface-app     (#d6e8f5)
+     Sidebar / panels    → --surface-panel   (#eaf4fb)
+     Cards / raised      → --surface-raised  (#bdd9ee)
+     Row hover           → --row-hover
+     Primary text        → --text            (inherited from light)
+     Secondary text      → --text-sub        (#2e3441)
+     Muted text          → --text-muted      (#4e535e)
+     Dim text            → --text-dim        (#6f747c)
+     Line / separator    → --stroke          (#99c4e0)
+     Subtle line         → --stroke-soft     (#bdd9ee)
+     Floating overlay    → --float-bg
+   =========================================================================== */
+
+:root.theme-ocean {
+    --surface-app: #d6e8f5;
+    --surface-panel: #eaf4fb;
+    --surface-raised: #bdd9ee;
+    /* Ocean has the darkest of the light grounds (raised #bdd9ee), so the text/sub/muted/dim scale has
+       to be its own — inheriting light's does not hold ΔL ≥ 12 alongside dim ≥ 3:1. */
+    --text-sub: #2e3441;
+    --text-muted: #4e535e;
+    --text-dim: #6f747c;
+    --stroke: #99c4e0;
+    --stroke-soft: #bdd9ee;
+
+    --accent-color: oklch(0.5 0.15 245);
+    --accent-subtle: oklch(0.92 0.05 245);
+    --accent-glow: oklch(0.5 0.15 245 / 0.15);
+    --accent-fg: oklch(0.4 0.12 245);
+
+    --float-bg: rgba(234, 244, 251, 0.94);
+    --float-shadow: 0 12px 32px rgba(5, 50, 90, 0.14);
+    --menu-shadow: 0 10px 30px rgba(5, 50, 90, 0.18);
+    --row-hover: rgba(5, 50, 90, 0.07);
+    --grid-dot: rgba(20, 80, 140, 0.09);
+    --scroll-thumb: #82b8d8;
+    --scroll-thumb-hover: #5499bf;
+
+    --color-amber-900: #fde68a;
+    --color-amber-500: #d97706;
+    --color-amber-400: #d97706;
+    --color-amber-300: #d97706;
+    --color-rose-400: #e11d48;
+    --color-rose-300: #e11d48;
+    --color-sky-400: #0284c7;
+    --color-violet-400: #7c3aed;
+    --color-emerald-300: #047857;
+    --color-emerald-400: #059669;
+    --color-emerald-500: #059669;
+}

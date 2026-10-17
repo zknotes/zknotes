@@ -1,0 +1,39 @@
+# ── ZKnotes API — Production image ────────────────────────────────────────
+FROM oven/bun:1.4.2-alpine AS builder
+
+WORKDIR /app
+
+# Copy the workspace manifests first, so the layer stays cached until the dependencies change.
+# `shared` goes in whole rather than as a manifest: the server depends on it as `file:../shared`,
+# and bun copies a `file:` dependency at install time. Copied from a manifest-only directory, the
+# package would reach the image without its source and the API would die on its first import.
+COPY package.json bun.lock ./
+COPY shared shared
+COPY server/package.json server/
+COPY client/package.json client/
+RUN bun install --frozen-lockfile --production
+
+# Copy the source.
+COPY server server
+
+# ── Runtime image ──────────────────────────────────────────────────────────────
+FROM oven/bun:1.4.2-alpine
+
+WORKDIR /app
+COPY --from=builder /app .
+
+# The encrypted file chunks live in S3/R2 (the S3_* variables). There is no local chunk storage in the image.
+
+ARG APP_COMMIT=dev
+ENV APP_COMMIT=$APP_COMMIT
+
+ENV NODE_ENV=production
+ENV PORT=3000
+
+EXPOSE 3000
+
+# entrypoint.sh runs the migrations, then starts the API.
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+USER bun
+ENTRYPOINT ["/entrypoint.sh"]

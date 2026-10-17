@@ -1,0 +1,50 @@
+# Dependabot keeps the dependencies, the SHA-pinned GitHub Actions and the container images current.
+#
+# `cooldown` holds each version update back for a week after its release: a compromised release is
+# usually found and pulled within days, and this repository should not be among the first to install
+# one. Security updates (switched on in the repository settings) are not delayed by it.
+#
+# The Bun image is ignored on purpose. Its version lives in `packageManager` in package.json and is
+# repeated in the Dockerfiles (scripts/bun-version.test.ts holds them equal), so a pull request that
+# bumps only the Dockerfiles would fail that test; Bun is upgraded by hand, in all places at once.
+#
+# PostgreSQL major versions are ignored too: a new major cannot open the previous one's data
+# directory, so it needs a dump-and-restore upgrade, never a tag bump.
+
+version: 2
+updates:
+  - package-ecosystem: bun
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+
+  - package-ecosystem: docker
+    directory: /docker
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    ignore:
+      - dependency-name: oven/bun
+
+  - package-ecosystem: docker-compose
+    directories: ["/", "/docker"]
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    ignore:
+      - dependency-name: postgres
+        update-types: ["version-update:semver-major"]

@@ -1,0 +1,182 @@
+# Public CI for ZKnotes.
+#
+# Two rules shape this file, and both come from the project's own plan:
+#
+#   1. A workflow that runs on someone else's pull request must never see secrets or hold deploy
+#      rights. Handing a fork's code write access to the repository is a well-worn way to take over
+#      an open-source project. `permissions: contents: read` at the top makes read-only the default
+#      for every job, and no job declares an `environment` or reads `secrets`.
+#
+#   2. This repository must build on its own — no private dependency, no private registry, no token.
+#      That claim is what makes publishing the source meaningful: if you cannot build the client
+#      yourself, you cannot check that the app you were served matches this code; and if you cannot
+#      build the images, you cannot run it at all. The `clean-build` job proves both — the client in
+#      a container that has nothing but this checkout, and the deployment images from the checkout
+#      exactly as docker-compose.yml builds them.
+#
+# `pull_request` (not `pull_request_target`) is deliberate: the latter runs in the context of the
+# base repository with access to secrets, which is exactly what rule 1 forbids. The one exception is
+# cla.yml, which never runs the pull request's code; its header explains why that makes it safe.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Code quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          # `packageManager` in package.json is the one place the Bun version lives; the Dockerfiles
+          # and the clean-build job below use the same version (scripts/bun-version.test.ts holds
+          # them together), so CI tests the runtime that ships in the images.
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      - name: ./check.sh
+        run: ./check.sh
+      # `check.sh` writes Biome formatting fixes. On CI that must be a failure rather than a silent
+      # repair, otherwise unformatted code merges and the next contributor gets the diff.
+      - name: Working tree unchanged by check.sh
+        run: git diff --exit-code
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          # `packageManager` in package.json is the one place the Bun version lives; the Dockerfiles
+          # and the clean-build job below use the same version (scripts/bun-version.test.ts holds
+          # them together), so CI tests the runtime that ships in the images.
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      # No `services:` and no separate Garage step: test.sh starts the test database and object
+      # store from docker-compose.yml itself, exactly as it does on a developer's machine. Declaring
+      # them here as well would bind ports 5433 and 9002 twice and fail before the first test.
+      # The API and unit layers. E2E needs a browser and a built client; it runs in the job below.
+      - name: ./test.sh
+        run: ./test.sh
+
+  e2e:
+    name: End-to-end
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          # `packageManager` in package.json is the one place the Bun version lives; the Dockerfiles
+          # and the clean-build job below use the same version (scripts/bun-version.test.ts holds
+          # them together), so CI tests the runtime that ships in the images.
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      # test.sh starts its own database and object store — see the `test` job above.
+      - run: bunx playwright install --with-deps chromium
+      # A pull request runs the fast E2E smoke; a push to main runs every spec (chromium + PWA).
+      - name: ./test.sh ${{ github.event_name == 'push' && '--e2e-full' || '--e2e' }}
+        run: ./test.sh "$E2E_FLAG"
+        env:
+          E2E_FLAG: ${{ github.event_name == 'push' && '--e2e-full' || '--e2e' }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: failure()
+        with:
+          name: playwright-report
+          path: client/test-results/
+          retention-days: 7
+
+  clean-build:
+    name: Builds from this repository alone
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # No setup-bun here on purpose: the build happens inside a container that gets nothing but
+      # this checkout, so it cannot quietly use a tool or cache the runner happens to have. The
+      # container is the official Bun image at the version `packageManager` in package.json names.
+      - name: Bun image from package.json
+        run: echo "BUN_IMAGE=oven/bun:$(node -p 'require("./package.json").packageManager.split("@")[1]')-alpine" >> "$GITHUB_ENV"
+      - name: Build the client in a clean container
+        run: |
+          docker run --rm \
+            -v "$PWD:/src:ro" \
+            -w /work \
+            "$BUN_IMAGE" \
+            sh -eux -c '
+              # tar with excludes rather than cp: a local run would otherwise copy gigabytes of
+              # node_modules just to delete them, and any stale install could mask a missing dep.
+              tar -C /src -cf - \
+                --exclude=node_modules --exclude=.git --exclude=build \
+                --exclude=.svelte-kit --exclude=test-results . | tar -C /work -xf -
+              bun install --frozen-lockfile
+              cd client && bun run build
+              test -f build/index.html
+            '
+      # "The client builds" and "the deployment builds" are two different claims, and only the first
+      # was ever checked. Both Dockerfiles carried a `COPY` of a directory that is not part of this
+      # repository: `docker compose build` died on its first step for anyone cloning the public repo,
+      # while this job stayed green because it never opened a Dockerfile. The images are what a
+      # self-hoster actually runs, so they have to build from this checkout too.
+      #
+      # `context: ..` with `-f docker/Dockerfile.*` is exactly what docker-compose.yml does — the
+      # gate has to exercise the real deployment path, not a convenient approximation of it.
+      - name: The deployment images must build from this checkout
+        run: |
+          docker build -f docker/Dockerfile.api -t zknotes-api:ci .
+          docker build -f docker/Dockerfile.web -t zknotes-web:ci .
+
+          # A green `docker build` only proves the steps ran. Assert the artefacts the runtime needs,
+          # so an image that builds but cannot serve is still a failure.
+          docker run --rm --entrypoint sh zknotes-api:ci -c \
+            'test -f /app/server/index.ts && test -f /app/shared/src/index.ts && test -f /entrypoint.sh'
+          # The file above is the workspace copy; the server resolves the one bun copied at install
+          # time (`file:../shared`), which once shipped as a bare manifest. Resolve it the way the
+          # server does, so that image fails here instead of on its first import in production.
+          docker run --rm --entrypoint sh -w /app/server zknotes-api:ci -c \
+            'bun -e "await import(\"@zknotes/shared\")"'
+          docker run --rm --entrypoint sh zknotes-web:ci -c \
+            'test -f /usr/share/nginx/html/index.html'
+
+          # The SvelteKit shell carries one inline bootstrap script, and its sha256 is baked into the
+          # nginx CSP at image build. extract-csp-script-hashes.ts treats "no hashes" as valid, so a
+          # broken extraction would ship a script-src that blocks the bootstrap — a blank app behind
+          # a CSP that looks correct. Assert a hash actually landed.
+          docker run --rm --entrypoint sh zknotes-web:ci -c \
+            "grep -q \"script-src 'self' 'wasm-unsafe-eval' 'sha256-\" /etc/nginx/templates/default.conf.template"
+      # A negative test is what makes the job mean something. Without it a green tick only says
+      # "nothing private happened to be declared today", not "private things are rejected".
+      - name: A dependency outside the repository must fail the build
+        run: |
+          node -e '
+            const fs = require("fs");
+            const p = "client/package.json";
+            const d = JSON.parse(fs.readFileSync(p, "utf8"));
+            d.dependencies["@example/private-package"] = "file:../../private/package";
+            fs.writeFileSync(p, JSON.stringify(d, null, 4) + "\n");
+          '
+          # Not --frozen-lockfile here: a frozen lockfile would fail on the lockfile rather than on
+          # the dependency, which would prove the wrong thing.
+          if docker run --rm -v "$PWD:/src:ro" -w /work "$BUN_IMAGE" sh -eu -c '
+               tar -C /src -cf - --exclude=node_modules --exclude=.git --exclude=build \
+                 --exclude=.svelte-kit --exclude=test-results . | tar -C /work -xf -
+               bun install
+             '; then
+            echo "::error::the clean container resolved a dependency from outside the repository"
+            exit 1
+          fi
+          git checkout -- client/package.json

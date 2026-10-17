@@ -1,0 +1,74 @@
+/* ===========================================================================
+   THEME: light — a clean neutral grey (with neither a warm nor a cold tint)
+
+   SURFACE MAP — where each variable goes:
+     App background      → --surface-app     (#f3f4f6)
+     Sidebar / panels    → --surface-panel   (#ffffff)
+     Cards / raised      → --surface-raised  (#eaecef)
+     Row hover           → --row-hover
+     Primary text        → --text
+     Secondary text      → --text-sub
+     Muted text          → --text-muted
+     Dim text            → --text-dim
+     Line / separator    → --stroke
+     Subtle line         → --stroke-soft
+     Accent              → --accent-color
+     Accent background   → --accent-subtle
+     Accent text         → --accent-fg
+     Floating overlay    → --float-bg
+   =========================================================================== */
+
+@layer base {
+    :root {
+        --radius: 0.5rem;
+
+        /* ZKnotes design tokens — light */
+        --surface-app: #f3f4f6;
+        --surface-panel: #ffffff;
+        --surface-raised: #eaecef;
+        --stroke: #dee0e4;
+        --stroke-soft: #e9ebee;
+        --text: #111827;
+        --text-sub: #323946;
+        --text-muted: #565c68;
+        --text-dim: #7d828c;
+        --accent-color: oklch(0.54 0.16 250);
+        --accent-subtle: oklch(0.92 0.05 250);
+        --accent-glow: oklch(0.56 0.16 250 / 0.12);
+        --accent-fg: oklch(0.44 0.13 250);
+
+        --scroll-thumb: #d1d5db;
+        --scroll-thumb-hover: #9ca3af;
+        --float-bg: rgba(255, 255, 255, 0.92);
+        --float-shadow: 0 12px 32px rgba(17, 24, 39, 0.12);
+        --menu-shadow: 0 10px 30px rgba(17, 24, 39, 0.14);
+        --row-hover: rgba(17, 24, 39, 0.045);
+        --grid-dot: rgba(107, 114, 128, 0.06);
+
+        /* Semantic colors for buttons and states */
+        --danger: #dc2626;
+        --warning: #d97706;
+        --info: #2563eb;
+        --success: #16a34a;
+        --warning-on: #1a1205;
+
+        /* The semantic indicators (star, the dirty/pending dot) */
+        --star-color: #b45309;
+        --dirty-color: #0284c7;
+    }
+
+    /* The decorative colours — strengthened for contrast on light surfaces */
+    :root:not(.dark) {
+        --color-amber-900: #fde68a;
+        --color-amber-500: #d97706;
+        --color-amber-400: #d97706;
+        --color-amber-300: #d97706;
+        --color-rose-400: #e11d48;
+        --color-rose-300: #e11d48;
+        --color-sky-400: #0284c7;
+        --color-violet-400: #7c3aed;
+        --color-emerald-300: #047857;
+        --color-emerald-400: #059669;
+        --color-emerald-500: #059669;
+    }
+}

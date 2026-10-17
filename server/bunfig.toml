@@ -1,0 +1,5 @@
+[test]
+# Preload setup.ts before every test run so the test DB (port 5433) is used
+# instead of the dev DB (port 5434 from .env). This applies to both
+# `bun test` and `bun run test` — prevents accidental writes to the dev DB.
+preload = ["./test/setup.ts"]

@@ -1,0 +1,39 @@
+{
+    "$schema": "https://unpkg.com/knip@6/schema.json",
+    "workspaces": {
+        ".": {
+            "entry": [],
+            "project": [],
+            "ignoreBinaries": []
+        },
+        "client": {
+            "entry": [
+                "src/lib/modules/export/html-export.ts",
+                "src/lib/core/ui/dev/**",
+                "src/lib/modules/files/dev/**",
+                "src/routes/dev/**",
+                "src/test-stubs/*.ts"
+            ],
+            "project": ["src/**/*.{ts,svelte,js,css}"],
+            "ignore": [
+                "src/lib/core/api/index.ts",
+                "src/lib/core/sync/index.ts",
+                "src/lib/core/ui/index.ts",
+                "src/lib/index.ts",
+                "src/lib/modules/export/full-backup-import.ts"
+            ],
+            "ignoreDependencies": ["@sveltejs/adapter-auto"],
+            "vite": false
+        },
+        "server": {
+            "entry": ["src/scripts/*.ts", "test/**/*.ts"],
+            "project": ["src/**/*.ts"],
+            "ignoreDependencies": ["pino"]
+        },
+        "shared": {
+            "project": ["src/**/*.ts"]
+        }
+    },
+    "ignoreExportsUsedInFile": true,
+    "exclude": ["enumMembers"]
+}

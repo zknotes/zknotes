@@ -1,0 +1,64 @@
+# The Contributor License Agreement check.
+#
+# Everyone who authors a commit in a pull request signs .github/CLA.md once, by posting a fixed
+# sentence as a comment. This workflow checks every commit author against the signatures, records
+# new ones in `signatures.json` on the `cla-signatures` branch, and reports the result as the `CLA`
+# commit status — the status that branch protection on `main` requires. The logic, and its tests,
+# live in scripts/cla/.
+#
+# Unlike ci.yml this runs on `pull_request_target`, because it has to comment, set a status and
+# commit a signature: a `pull_request` run from a fork only ever gets a read-only token. What keeps
+# that safe is one rule, which must stay true: this workflow never checks out, builds or runs code
+# from the pull request. It checks out the DEFAULT branch and runs scripts/cla/cla-bot.ts from
+# there; the pull request is read through the API, as data, and never reaches a shell. It uses no
+# secret beyond the job's own token.
+#
+# GitHub blocks `pull_request_target` in public repositories unless an Actions event policy allows it
+# (enforced from 2026-11-02). The repository therefore needs a policy under Settings → Actions →
+# Policies that targets this file only and allows `pull_request_target` and `issue_comment`.
+#
+# No `concurrency` group on purpose: GitHub replaces a pending run in a group with a newer one, which
+# could drop the run that was about to record a signature. Each run instead re-reads the whole
+# thread, and concurrent writes to the signatures file are detected and merged.
+
+name: CLA
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write # commits to the `cla-signatures` branch, nothing else
+  pull-requests: write # the bot's comment
+  statuses: write # the `CLA` status
+
+jobs:
+  cla:
+    name: CLA
+    # Comments only matter on pull requests, and only when they sign or ask for a recheck.
+    if: >-
+      github.event_name == 'pull_request_target' ||
+      (github.event.issue.pull_request &&
+      (contains(github.event.comment.body, 'hereby sign') ||
+      contains(github.event.comment.body, 'recheck')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          # Read from the default branch checked out above, never from the pull request.
+          bun-version-file: package.json
+      - name: Check the CLA
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          # Comma-separated logins that need no signature. The repository owner and every `[bot]`
+          # account are exempt already; add the maintainer's login here if the repository belongs
+          # to an organisation.
+          CLA_ALLOWLIST: "jankod"
+        run: BASE_SHA="$(git rev-parse HEAD)" bun scripts/cla/cla-bot.ts

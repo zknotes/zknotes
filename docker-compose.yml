@@ -1,0 +1,178 @@
+# Local development and test databases.
+# Production stack lives in docker/docker-compose.yml.
+#
+# Usage:
+#   docker compose up -d              # all services (DBs + Garage)
+#   docker compose up -d db           # dev DB only (:5434)
+#   docker compose up -d db_test      # test DB only (:5433)
+#   docker compose up -d garage       # dev object store (:9000)
+#   docker compose up -d garage_test  # test object store (:9002)
+
+# Every port is published on 127.0.0.1 only: these services run with well-known credentials
+# (zknotes/zknotes, minioadmin), so they must not be reachable from the network the machine is on.
+#
+# Pinned so the Compose project does not silently follow the directory name: container and volume
+# names then stay the same no matter where this repository is cloned, and a second checkout cannot
+# quietly start a rival set of containers competing for the same host ports (5433, 9002).
+name: open-core
+
+services:
+  # ── Dev DB (port 5434) ───────────────────────────────────────────────────────
+  # Used by `bun run index.ts` (server/.env → DATABASE_URL=...localhost:5434/...)
+  db:
+    image: postgres:18.4-bookworm
+    environment:
+      POSTGRES_USER: zknotes
+      POSTGRES_PASSWORD: zknotes
+      POSTGRES_DB: zknotes
+    ports:
+      - "127.0.0.1:5434:5432"
+    volumes:
+      # PG 18+ requires mount at /var/lib/postgresql (not /data) — creates subdir automatically.
+      - pgdata_dev:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zknotes"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── Test DB (port 5433) ──────────────────────────────────────────────────────
+  # Used by `bun test` — test/setup.ts connects here, runs migrations, then tests run.
+  # tmpfs rather than a volume: without it the postgres image creates an ANONYMOUS volume that compose
+  # carries over when the container is recreated — a change to the POSTGRES_* variables (a renamed
+  # user or database, say) then silently inherits the old database with the old credentials.
+  # With tmpfs every recreate is a fresh initialisation, and the tests run out of RAM.
+  db_test:
+    image: postgres:18.4-bookworm
+    environment:
+      POSTGRES_USER: zknotes
+      POSTGRES_PASSWORD: zknotes
+      POSTGRES_DB: zknotes_test
+    ports:
+      - "127.0.0.1:5433:5432"
+    tmpfs:
+      # PG 18+ keeps its data under /var/lib/postgresql (PGDATA=/var/lib/postgresql/18/docker)
+      - /var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zknotes"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── Dev Object Store (Garage, S3 compatible) ─────────────────────────────────
+  # MinIO's open-source edition was archived by its maintainer in 2026 (Docker images stopped in
+  # Oct 2025, the repo went read-only in Apr 2026 — no more security patches, ever), pushed towards
+  # their paid AIStor product instead. Garage (Deuxfleurs) is a single-binary S3-compatible store
+  # still under active AGPLv3 development — the same license family as this repository. Its image has
+  # no shell (scratch-based), so there is no in-container healthcheck; garage_init's own retry loop
+  # is what waits for it to come up.
+  garage:
+    image: dxflrs/garage:v2.4.1
+    command: /garage -c /etc/garage.toml server --single-node --default-bucket --default-access-key
+    environment:
+      GARAGE_DEFAULT_ACCESS_KEY: minioadmin
+      GARAGE_DEFAULT_SECRET_KEY: minioadmin-dev-secret
+      GARAGE_DEFAULT_BUCKET: zknotes
+    volumes:
+      - ./garage.dev.toml:/etc/garage.toml:ro
+      - garage_data_dev:/data
+    ports:
+      - "127.0.0.1:9000:3900" # S3 API — the historical MinIO port, so server/.env needs no change
+      - "127.0.0.1:9001:3903" # Admin API (/health) — dev.sh polls this from the host
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Sets the CORS rule the browser needs for direct presigned PUT/GET, and waits for `garage` to be
+  # reachable first (it has no healthcheck to depend on). Garage has no MINIO_API_CORS_ALLOW_ORIGIN-
+  # style env var — CORS is per-bucket, set through the standard S3 PutBucketCors API. Without this a
+  # browser upload fails the CORS preflight; a fresh volume also gives a presigned PUT 404 NoSuchBucket
+  # (the "--default-bucket" flag above covers that half).
+  garage_init:
+    image: amazon/aws-cli:2.31.11
+    depends_on:
+      garage:
+        condition: service_started
+    environment:
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin-dev-secret
+      AWS_DEFAULT_REGION: us-east-1
+    volumes:
+      - ./garage-cors.dev.json:/cors.json:ro
+    entrypoint: >
+      /bin/sh -c "
+      for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
+      aws --endpoint-url http://garage:3900 s3api put-bucket-cors --bucket zknotes --cors-configuration file:///cors.json && break;
+      sleep 1;
+      done &&
+      echo 'garage bucket zknotes CORS ready'
+      "
+    restart: "no"
+    logging:
+      driver: json-file
+      options:
+        max-size: "1m"
+        max-file: "1"
+
+  # ── Test Object Store (Garage, S3 compatible) ────────────────────────────────
+  garage_test:
+    image: dxflrs/garage:v2.4.1
+    command: /garage -c /etc/garage.toml server --single-node --default-bucket --default-access-key
+    environment:
+      GARAGE_DEFAULT_ACCESS_KEY: minioadmin
+      GARAGE_DEFAULT_SECRET_KEY: minioadmin-dev-secret
+      GARAGE_DEFAULT_BUCKET: zknotes-test
+    volumes:
+      - ./garage.dev.toml:/etc/garage.toml:ro
+    ports:
+      - "127.0.0.1:9002:3900"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # The test bucket's CORS rule (server/test/setup.ts does a CreateBucket too — this is belt and
+  # braces for when someone wipes state and runs compose alone, with no test setup).
+  garage_test_init:
+    image: amazon/aws-cli:2.31.11
+    depends_on:
+      garage_test:
+        condition: service_started
+    environment:
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin-dev-secret
+      AWS_DEFAULT_REGION: us-east-1
+    volumes:
+      - ./garage-cors.dev.json:/cors.json:ro
+    entrypoint: >
+      /bin/sh -c "
+      for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
+      aws --endpoint-url http://garage_test:3900 s3api put-bucket-cors --bucket zknotes-test --cors-configuration file:///cors.json && break;
+      sleep 1;
+      done &&
+      echo 'garage_test bucket zknotes-test CORS ready'
+      "
+    restart: "no"
+    logging:
+      driver: json-file
+      options:
+        max-size: "1m"
+        max-file: "1"
+
+volumes:
+  pgdata_dev:
+  garage_data_dev:
+

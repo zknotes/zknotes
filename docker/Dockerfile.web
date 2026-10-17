@@ -1,0 +1,60 @@
+# ── ZKnotes Web — Static build ────────────────────────────────────────────
+# It builds the SvelteKit SPA with adapter-static, then serves it through a minimal nginx.
+# Every asset is immutable; the SPA shell is served for every route.
+FROM oven/bun:1.4.2-alpine AS builder
+
+WORKDIR /app
+
+COPY package.json bun.lock ./
+COPY shared/package.json shared/
+COPY client/package.json client/
+COPY server/package.json server/
+RUN bun install --frozen-lockfile
+
+COPY shared shared
+COPY client client
+
+# vite.config.ts imports changelogPlugin (it embeds CHANGELOG.md into the "what's new" panel).
+COPY scripts/changelog scripts/changelog
+COPY CHANGELOG.md CHANGELOG.md
+
+# VITE_API_URL is deliberately not set: the API is same-origin (Caddy routes by path prefix, see
+# docker/Caddyfile), so the SPA makes relative calls (API_BASE = "").
+
+# The public site's address is NOT a build input: the client gets it at runtime from
+# `/instance-config`, so the same build works on every instance. Set `PUBLIC_WWW_URL` in the API's
+# `.env`.
+
+ARG APP_COMMIT=dev
+ENV APP_COMMIT=${APP_COMMIT}
+
+# svelte.config.js uses adapter-static (an SPA with a fallback index.html) → the output lands in build/.
+RUN cd client && bun run build
+
+# CSP: the SvelteKit SPA shell carries one inline bootstrap <script> (whose hash changes with every
+# build, because the asset chunk names do). Extract the sha256 hashes and bake them into the nginx
+# template — the same image = the same HTML + the same script-src hashes (no 'unsafe-inline'). The
+# connect-src storage origin stays a runtime value (${CSP_CONNECT_EXTRA}).
+COPY docker/extract-csp-script-hashes.ts docker/nginx.conf.template /tmp/csp/
+RUN HASHES="$(bun /tmp/csp/extract-csp-script-hashes.ts /app/client/build/index.html)" \
+    && sed "s|{{CSP_SCRIPT_HASHES}}|${HASHES}|g" /tmp/csp/nginx.conf.template \
+        > /app/nginx-default.conf.template \
+    && echo "CSP script hashes: ${HASHES}"
+
+# ── Runtime image ──────────────────────────────────────────────────────────────
+FROM nginx:1.27-alpine
+
+COPY --from=builder /app/client/build /usr/share/nginx/html
+# The official nginx image: *.template in /etc/nginx/templates → envsubst at startup.
+# CSP_CONNECT_EXTRA (the S3 storage origin) comes from the compose environment.
+COPY --from=builder /app/nginx-default.conf.template /etc/nginx/templates/default.conf.template
+
+# Listen on 8080 (no NET_BIND_SERVICE). envsubst writes into conf.d at start; pid/cache/logs
+# must be writable by the nginx user.
+RUN chown -R nginx:nginx /var/cache/nginx /var/run /var/log/nginx /etc/nginx/conf.d \
+    && touch /var/run/nginx.pid \
+    && chown nginx:nginx /var/run/nginx.pid \
+    && sed -i -E 's/^(user[[:space:]]+)/# \1/' /etc/nginx/nginx.conf
+USER nginx
+
+EXPOSE 8080

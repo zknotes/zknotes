@@ -1,0 +1,99 @@
+# ZKnotes — a Caddy reverse proxy with automatic HTTPS (Let's Encrypt / ZeroSSL).
+#
+# DNS → this server. Every domain has to point at the server's IP before Caddy starts, so the ACME
+# challenge succeeds on the first boot.
+
+# HTTP/1.1 and HTTP/2 only. HTTP/3 runs over UDP, and rootless Docker does not pass a UDP client's
+# address through: every HTTP/3 visitor would reach the API as one address and share its per-IP
+# limits. (docker-compose.yml does not publish 443/udp either.)
+{
+    servers {
+        protocols h1 h2
+    }
+}
+
+# The domain comes from `APP_DOMAIN` (compose passes it through from `.env`) — a public repository must
+# not carry ours. A self-host sets its own; the dev default is `app.localhost`.
+#
+# ── The web SPA + the API on one domain ──────────────────────────────────────
+# The API and the SPA are separate containers; Caddy routes by path prefix — exactly as the Vite proxy
+# does in dev.
+{$APP_DOMAIN} {
+    # The API prefixes — they MUST match the proxy list in client/vite.config.ts
+    # (a new API prefix ⇒ update both files + API_PREFIXES in client/src/service-worker.ts).
+    # /client-log and /dev-* are dev-only routes and are deliberately NOT routed (a smaller attack
+    # surface).
+    @api path /auth /auth/* /vault /items /items/* /restore /restore/* /uploads /uploads/* /me /me/* /shares /shares/* /instance-config /client-error /health
+
+    handle @api {
+        # Strip any doubled slashes before proxying.
+        uri path_regexp //+ /
+
+        reverse_proxy api:3000 {
+            # Pass the real client IP through to Fastify (for rate limiting / logging).
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+        }
+    }
+
+    # Everything else → the static SPA build (nginx).
+    handle {
+        reverse_proxy web:8080
+    }
+
+    # HSTS (1 year, subdomains included).
+    header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+    header X-Content-Type-Options "nosniff"
+    header X-Frame-Options "DENY"
+
+    # There is DELIBERATELY NO Cache-Control override for /uploads/*/chunks/*.
+    # That route returns no bytes but JSON carrying a presigned S3 URL valid for 1 h; the API therefore
+    # gives it max-age=1800 (half the signature's life) in server/src/routes/files.ts. An earlier
+    # override to 86400 meant the browser served JSON with a long-expired signature for 24 h → a 403
+    # from S3. It is the chunk bytes themselves that have a long cache, and those are served by the S3
+    # origin (ResponseCacheControl), not by Caddy. The header stays in one place — in the API.
+
+    # The public share pages (/s/:id):
+    # no-referrer, so external links in a shared note do not receive /s/<share_id> in the Referer;
+    # noindex, so share links do not end up in the search engines.
+    # The `>` defers the header until the response from web/nginx is written, so it REPLACES the
+    # Referrer-Policy the web container sends instead of adding a second one (the browser applies
+    # the last). The bundled nginx sends no-referrer everywhere already; this keeps share pages
+    # right behind any other web server.
+    @share path /s /s/*
+    header @share >Referrer-Policy "no-referrer"
+    header @share >X-Robots-Tag "noindex"
+
+    # ─── CSP: the web (nginx) container, not Caddy ────────────────────────────
+    # The SPA shell (adapter-static) carries a SvelteKit inline bootstrap script whose sha256 changes
+    # with every build. The hashes are baked into the nginx conf while the web image is built
+    # (docker/Dockerfile.web + extract-csp-script-hashes.ts), so script-src stays free of
+    # 'unsafe-inline' and always matches the HTML.
+    # connect-src storage: CSP_CONNECT_EXTRA on the web service (= S3_ENDPOINT).
+    # Do NOT send a CSP here — two policies (Caddy + nginx) are AND-ed together, and an older Caddy
+    # header without the hashes would block the bootstrap all over again.
+
+    # COOP: it isolates the browsing context from cross-origin windows — a precondition for
+    # SharedArrayBuffer, and a guard against Spectre-style attacks.
+    header Cross-Origin-Opener-Policy "same-origin"
+
+    encode gzip
+
+    log {
+        level INFO
+    }
+}
+
+# The marketing site (the apex domain) does NOT live here: it is a separate application on its own
+# hosting. The vault serves only the domain named by `APP_DOMAIN`.
+
+# Any other origin an extended deployment adds (an admin or an account application) is NOT here:
+# those are separate applications and their routes come from their own deployment. This deployment
+# serves the vault's domain alone.
+#
+# Such a deployment mounts ITS OWN Caddyfile at /etc/caddy/Caddyfile and pulls this one in with
+# `import /etc/caddy/core.Caddyfile` — one block per origin, none of them defined twice.
+
+# Extra sites — the built-in object storage among them, when setup.sh enabled it (sites/README.md).
+# A pattern that matches nothing is not an error.
+import /etc/caddy/sites/*.caddy
