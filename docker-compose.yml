@@ -101,7 +101,7 @@ services:
   # browser upload fails the CORS preflight; a fresh volume also gives a presigned PUT 404 NoSuchBucket
   # (the "--default-bucket" flag above covers that half).
   garage_init:
-    image: amazon/aws-cli:2.31.11
+    image: amazon/aws-cli:2.37.12
     depends_on:
       garage:
         condition: service_started
@@ -147,7 +147,7 @@ services:
   # The test bucket's CORS rule (server/test/setup.ts does a CreateBucket too — this is belt and
   # braces for when someone wipes state and runs compose alone, with no test setup).
   garage_test_init:
-    image: amazon/aws-cli:2.31.11
+    image: amazon/aws-cli:2.37.12
     depends_on:
       garage_test:
         condition: service_started
