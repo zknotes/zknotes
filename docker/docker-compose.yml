@@ -113,7 +113,7 @@ services:
 
   # ── Caddy (reverse proxy, automatic HTTPS) ───────────────────────────────
   caddy:
-    image: caddy:2.9-alpine
+    image: caddy:2.11-alpine
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
