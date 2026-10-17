@@ -13,7 +13,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 /** Bump together with the version line in .github/CLA.md whenever the agreement's text changes. */
-export const CLA_VERSION = "1.0";
+export const CLA_VERSION = "1.1";
 export const SIGN_PHRASE = `I have read the ZKnotes CLA version ${CLA_VERSION} and I hereby sign it.`;
 export const STATUS_CONTEXT = "CLA";
 export const SIGNATURES_BRANCH = "cla-signatures";

@@ -54,7 +54,7 @@ you open a pull request, a check comments on it with a link to the agreement. To
 this sentence, on its own, as a new comment on the pull request:
 
 ```
-I have read the ZKnotes CLA version 1.0 and I hereby sign it.
+I have read the ZKnotes CLA version 1.1 and I hereby sign it.
 ```
 
 Posting it signs the agreement, once, for this and every later contribution; the `CLA` check then
