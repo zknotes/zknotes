@@ -94,15 +94,24 @@ version_ge() {
 
 # What rootless Docker needs so the API sees each visitor's own address (Docker's rootless
 # troubleshooting guide). Arguments: RootlessKit version, port driver, whether userland-proxy is
-# already off (1/0), Docker's major version, whether pasta and slirp4netns are installed (1/0).
-# Prints one of: ok, userland-proxy, pasta, slirp4netns, manual.
+# already off (1/0), Docker's major version, whether pasta and slirp4netns are installed (1/0),
+# whether the br_netfilter kernel module is loaded (1/0).
+# Prints one of: ok, br-netfilter, userland-proxy, pasta, slirp4netns, manual.
 rootless_fix_plan() {
     local rk="$1" port_driver="$2" proxy_off="$3" docker_major="$4" has_pasta="$5" has_slirp="$6"
+    local has_brnf="$7"
     case "$port_driver" in
         slirp4netns | implicit) echo ok; return ;;
     esac
     if [[ -n "$rk" ]] && version_ge "$rk" "3.0.0"; then
-        if [[ "$proxy_off" == 1 ]]; then echo ok; else echo userland-proxy; fi
+        # Without br_netfilter, dockerd refuses userland-proxy: false and then does not start at all.
+        if [[ "$proxy_off" == 1 ]]; then
+            echo ok
+        elif [[ "$has_brnf" == 1 ]]; then
+            echo userland-proxy
+        else
+            echo br-netfilter
+        fi
         return
     fi
     if [[ "$docker_major" -ge 25 && "$has_pasta" == 1 ]]; then
@@ -112,6 +121,36 @@ rootless_fix_plan() {
     else
         echo manual
     fi
+}
+
+# Waits up to 30 seconds for the Docker daemon to answer.
+docker_ready() {
+    local _
+    for _ in $(seq 1 30); do
+        docker info >/dev/null 2>&1 && return 0
+        sleep 1
+    done
+    return 1
+}
+
+# Restarts rootless Docker after setup.sh wrote the file $1. If Docker does not come back, the file
+# is removed and Docker restarted as it was, so a refused setting never leaves the server without
+# Docker. Returns 0 when the change took effect, 1 when it was taken back.
+restart_docker_or_undo() {
+    local written="$1"
+    say "  Restarting Docker…"
+    if systemctl --user restart docker && docker_ready; then
+        return 0
+    fi
+    warn "Docker did not start with the change, so setup.sh is taking it back out (journalctl --user -u docker says why)."
+    rm -f "$written"
+    systemctl --user daemon-reload
+    systemctl --user reset-failed docker 2>/dev/null || true
+    systemctl --user restart docker || true
+    docker_ready || die "Docker does not start any more — see: journalctl --user -u docker"
+    warn "Docker runs as before, and visitors still share one address. docker/README.md, \"Security checklist\", explains the fix."
+    warn "If containers then stop with \"network … does not exist\": docker compose down && docker compose up -d (never down -v)."
+    return 1
 }
 
 # The Caddy site that publishes the built-in storage on STORAGE_DOMAIN.
@@ -266,7 +305,8 @@ check_rootless() {
         die "Then run setup.sh again."
     fi
 
-    local rk port_driver proxy_off docker_major has_pasta has_slirp plan daemon_json override env_line
+    local rk port_driver proxy_off docker_major has_pasta has_slirp has_brnf plan daemon_json override
+    local env_line written
     rk="$(rootlesskit --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1 || true)"
     env_line="$(systemctl --user show docker -p Environment 2>/dev/null || true)"
     port_driver="$(grep -oE 'DOCKERD_ROOTLESS_ROOTLESSKIT_PORT_DRIVER=[^ ]+' <<<"$env_line" | cut -d= -f2 || true)"
@@ -279,7 +319,10 @@ check_rootless() {
     command -v pasta >/dev/null 2>&1 && has_pasta=1
     has_slirp=0
     command -v slirp4netns >/dev/null 2>&1 && has_slirp=1
-    plan="$(rootless_fix_plan "$rk" "$port_driver" "$proxy_off" "${docker_major:-0}" "$has_pasta" "$has_slirp")"
+    # What dockerd itself checks before it runs without the userland proxy.
+    has_brnf=0
+    [[ -e /proc/sys/net/bridge/bridge-nf-call-iptables ]] && has_brnf=1
+    plan="$(rootless_fix_plan "$rk" "$port_driver" "$proxy_off" "${docker_major:-0}" "$has_pasta" "$has_slirp" "$has_brnf")"
     say "  RootlessKit ${rk:-unknown}, port driver ${port_driver}"
 
     if [[ "$plan" == ok ]]; then
@@ -290,6 +333,12 @@ check_rootless() {
     say "  address, so every per-address limit — the sign-in pause among them — would be shared by all."
     override="${HOME}/.config/systemd/user/docker.service.d/override.conf"
     case "$plan" in
+        br-netfilter)
+            warn "The fix needs the br_netfilter kernel module first; without it Docker would not start. Run once, as root:"
+            warn "  echo br_netfilter | sudo tee /etc/modules-load.d/docker.conf && sudo modprobe br_netfilter"
+            warn "Then run setup.sh again to finish."
+            return 0
+            ;;
         userland-proxy)
             if [[ -f "$daemon_json" ]]; then
                 warn "Add \"userland-proxy\": false to ${daemon_json}, then: systemctl --user restart docker"
@@ -301,6 +350,7 @@ check_rootless() {
             }
             mkdir -p "$(dirname "$daemon_json")"
             printf '{\n  "userland-proxy": false\n}\n' >"$daemon_json"
+            written="$daemon_json"
             ;;
         pasta | slirp4netns)
             if [[ -f "$override" ]]; then
@@ -317,6 +367,7 @@ check_rootless() {
             else
                 printf '[Service]\nEnvironment="DOCKERD_ROOTLESS_ROOTLESSKIT_NET=slirp4netns"\nEnvironment="DOCKERD_ROOTLESS_ROOTLESSKIT_PORT_DRIVER=slirp4netns"\n' >"$override"
             fi
+            written="$override"
             systemctl --user daemon-reload
             ;;
         manual)
@@ -324,10 +375,12 @@ check_rootless() {
             return 0
             ;;
     esac
-    say "  Restarting Docker…"
-    systemctl --user restart docker
-    for _ in $(seq 1 30); do docker info >/dev/null 2>&1 && break; sleep 1; done
-    say "  Done. If the API still sees one address, load the br_netfilter kernel module (docker/README.md)."
+    restart_docker_or_undo "$written" || return 0
+    if [[ "$plan" == userland-proxy ]]; then
+        say "  Done."
+    else
+        say "  Done. If the API still sees one address, load the br_netfilter kernel module (docker/README.md)."
+    fi
 }
 
 check_dns() {

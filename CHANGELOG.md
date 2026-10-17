@@ -11,6 +11,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
   cell instead of splitting in two.
 - Search: text that looks like an HTML entity, such as `&lt;` typed into a note, is indexed as typed
   instead of as `<`.
+- `docker/setup.sh` on rootless Docker no longer turns off Docker's userland proxy while the
+  `br_netfilter` kernel module is missing. Docker refused that setting and stopped starting; the
+  script now prints the command that loads the module first. If Docker still does not come back
+  after a change the script made, it takes the change back out and starts Docker again.
 
 ## [0.2.0] - 2026-10-17
 

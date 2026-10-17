@@ -44,7 +44,9 @@ and the checklist before going live (§6).
 - File storage: the built-in one needs a second domain name pointing at the server (e.g.
   `s3.notes.example.com`); or an S3-compatible bucket of your own (see [Object storage](#object-storage)).
 - **Rootless Docker** also needs, once, as root: `net.ipv4.ip_unprivileged_port_start=80` (so Caddy
-  can listen on 80 and 443) — `setup.sh` checks it and prints the command.
+  can listen on 80 and 443), and on RootlessKit 3 or newer the `br_netfilter` kernel module (so
+  Docker can run without its userland proxy and pass visitors' addresses through) — `setup.sh`
+  checks both and prints the commands.
 
 ---
 
@@ -346,7 +348,13 @@ The API JSON routes (`GET/POST /shares/:id`) are separate; rate limits are confi
       `172.x` Docker address. Rootless Docker does not pass the client address through by default
       (and never for HTTP/3 over UDP), and IPv6 clients of an IPv4-only Docker network arrive from
       the bridge gateway; if every client shares one address, every per-IP limit and the sign-in
-      pause become one shared bucket that anyone can exhaust
+      pause become one shared bucket that anyone can exhaust. On RootlessKit 3 or newer the fix is
+      `{"userland-proxy": false}` in `~/.config/docker/daemon.json` and `systemctl --user restart
+      docker` — but load `br_netfilter` **first**
+      (`echo br_netfilter | sudo tee /etc/modules-load.d/docker.conf && sudo modprobe br_netfilter`):
+      without it Docker refuses that setting and does not start at all. If a failed restart leaves
+      the containers stopped with `network … does not exist`, `docker compose down` and
+      `docker compose up -d` recreate the networks (never `down -v`, which deletes the data)
 - [ ] Per-IP rate limits see real client addresses: the API trusts `X-Forwarded-For` only from
       `TRUST_PROXY` (compose default: the `edge` subnet, which only Caddy shares with the API). If
       you put another proxy in front, list its address there; anything that reaches `api:3000`

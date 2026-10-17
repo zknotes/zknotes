@@ -114,15 +114,54 @@ describe("helpers", () => {
     it("rootless_fix_plan follows Docker's rootless guide", () => {
         const dir = workdir();
         const plan = (args: string) => lib(dir, `rootless_fix_plan ${args}`).out;
-        // rootlesskit, port driver, userland-proxy off, docker major, pasta, slirp4netns
-        expect(plan("2.3.4 slirp4netns 0 27 0 0")).toBe("ok");
-        expect(plan("2.3.4 implicit 0 27 1 0")).toBe("ok");
-        expect(plan("3.0.1 builtin 1 28 0 0")).toBe("ok");
-        expect(plan("3.0.1 builtin 0 28 0 0")).toBe("userland-proxy");
-        expect(plan("2.3.4 builtin 0 27 1 1")).toBe("pasta");
-        expect(plan("2.3.4 builtin 0 24 1 1")).toBe("slirp4netns");
-        expect(plan("'' builtin 0 27 0 1")).toBe("slirp4netns");
-        expect(plan("2.3.4 builtin 0 27 0 0")).toBe("manual");
+        // rootlesskit, port driver, userland-proxy off, docker major, pasta, slirp4netns, br_netfilter
+        expect(plan("2.3.4 slirp4netns 0 27 0 0 0")).toBe("ok");
+        expect(plan("2.3.4 implicit 0 27 1 0 0")).toBe("ok");
+        expect(plan("3.0.1 builtin 1 28 0 0 1")).toBe("ok");
+        expect(plan("3.0.1 builtin 0 28 0 0 1")).toBe("userland-proxy");
+        // Docker refuses userland-proxy: false without br_netfilter, and then does not start.
+        expect(plan("3.0.1 builtin 0 28 0 0 0")).toBe("br-netfilter");
+        expect(plan("2.3.4 builtin 0 27 1 1 0")).toBe("pasta");
+        expect(plan("2.3.4 builtin 0 24 1 1 0")).toBe("slirp4netns");
+        expect(plan("'' builtin 0 27 0 1 0")).toBe("slirp4netns");
+        expect(plan("2.3.4 builtin 0 27 0 0 0")).toBe("manual");
+    });
+
+    // systemctl and docker are replaced by shell functions that log their calls.
+    const stubs = (dir: string, restartFailsOnce: boolean) => `
+        systemctl() {
+            echo "systemctl $*" >> "${dir}/calls"
+            if ${restartFailsOnce} && [[ "$*" == "--user restart docker" && ! -e "${dir}/failed" ]]; then
+                touch "${dir}/failed"
+                return 1
+            fi
+        }
+        docker() { return 0; }
+        written="${dir}/daemon.json"
+        echo '{ "userland-proxy": false }' > "$written"
+        if restart_docker_or_undo "$written"; then echo took; else echo undone; fi
+        [[ -e "$written" ]] && echo kept || echo removed`;
+
+    it("restart_docker_or_undo keeps a change Docker starts with", () => {
+        const dir = workdir();
+        const res = lib(dir, stubs(dir, false));
+        expect(res.out.split("\n").slice(-2)).toEqual(["took", "kept"]);
+        expect(readFileSync(join(dir, "calls"), "utf8").trim()).toBe(
+            "systemctl --user restart docker",
+        );
+    });
+
+    it("restart_docker_or_undo takes back a change Docker refuses and starts Docker again", () => {
+        const dir = workdir();
+        const res = lib(dir, stubs(dir, true));
+        expect(res.out.split("\n").slice(-2)).toEqual(["undone", "removed"]);
+        expect(readFileSync(join(dir, "calls"), "utf8").trim().split("\n")).toEqual([
+            "systemctl --user restart docker",
+            "systemctl --user daemon-reload",
+            "systemctl --user reset-failed docker",
+            "systemctl --user restart docker",
+        ]);
+        expect(res.err).toContain("taking it back out");
     });
 });
 
