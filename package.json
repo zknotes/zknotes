@@ -22,8 +22,8 @@
         "test": "./test.sh"
     },
     "devDependencies": {
-        "@biomejs/biome": "^2.5.0",
-        "knip": "^6.32.2",
+        "@biomejs/biome": "^2.5.15",
+        "knip": "^6.41.0",
         "typescript": "^6.0.3"
     }
 }

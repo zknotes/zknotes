@@ -33,62 +33,62 @@ BUSL, Elastic License, Commons Clause, PolyForm or a proprietary license.
 | Package | Version | License | Used by |
 |---|---|---|---|
 | `@aarkue/tiptap-math-extension` | 1.4.0 | MIT | client |
-| `@aws-sdk/client-s3` | 3.1094.0 | Apache-2.0 | server |
-| `@aws-sdk/s3-request-presigner` | 3.1094.0 | Apache-2.0 | server |
-| `@fastify/cookie` | 11.1.2 | MIT | server |
-| `@fastify/cors` | 11.3.0 | MIT | server |
-| `@fastify/helmet` | 13.1.0 | MIT | server |
-| `@fastify/rate-limit` | 11.1.0 | MIT | server |
-| `@noble/ciphers` | 2.2.0 | MIT | shared |
-| `@noble/hashes` | 2.2.0 | MIT | shared |
-| `@node-rs/argon2` | 2.0.2 | MIT | server |
-| `@sveltejs/kit` | 2.70.1 | MIT | client (development dependency) |
+| `@aws-sdk/client-s3` | 3.1149.0 | Apache-2.0 | server |
+| `@aws-sdk/s3-request-presigner` | 3.1149.0 | Apache-2.0 | server |
+| `@fastify/cookie` | 11.1.3 | MIT | server |
+| `@fastify/cors` | 11.3.1 | MIT | server |
+| `@fastify/helmet` | 13.1.2 | MIT | server |
+| `@fastify/rate-limit` | 11.2.1 | MIT | server |
+| `@noble/ciphers` | 2.4.0 | MIT | shared |
+| `@noble/hashes` | 2.4.0 | MIT | shared |
+| `@node-rs/argon2` | 2.2.2 | MIT | server |
+| `@sveltejs/kit` | 2.70.3 | MIT | client (development dependency) |
 | `@tailwindcss/typography` | 0.5.20 | MIT | client (build-time plugin) |
-| `@tanstack/svelte-query` | 6.1.38 | MIT | client |
-| `@tiptap/core` | 3.28.0 | MIT | client |
-| `@tiptap/extension-color` | 3.28.0 | MIT | client |
-| `@tiptap/extension-highlight` | 3.28.0 | MIT | client |
-| `@tiptap/extension-image` | 3.28.0 | MIT | client |
-| `@tiptap/extension-link` | 3.28.0 | MIT | client |
-| `@tiptap/extension-mention` | 3.28.0 | MIT | client |
-| `@tiptap/extension-placeholder` | 3.28.0 | MIT | client |
-| `@tiptap/extension-subscript` | 3.28.0 | MIT | client |
-| `@tiptap/extension-superscript` | 3.28.0 | MIT | client |
-| `@tiptap/extension-table` | 3.28.0 | MIT | client |
-| `@tiptap/extension-table-cell` | 3.28.0 | MIT | client |
-| `@tiptap/extension-table-header` | 3.28.0 | MIT | client |
-| `@tiptap/extension-table-row` | 3.28.0 | MIT | client |
-| `@tiptap/extension-task-item` | 3.28.0 | MIT | client |
-| `@tiptap/extension-task-list` | 3.28.0 | MIT | client |
-| `@tiptap/extension-text-align` | 3.28.0 | MIT | client |
-| `@tiptap/extension-text-style` | 3.28.0 | MIT | client |
-| `@tiptap/extension-underline` | 3.28.0 | MIT | client |
-| `@tiptap/pm` | 3.28.0 | MIT | client |
-| `@tiptap/starter-kit` | 3.28.0 | MIT | client |
-| `bits-ui` | 2.18.1 | MIT | client |
+| `@tanstack/svelte-query` | 6.3.1 | MIT | client |
+| `@tiptap/core` | 3.31.4 | MIT | client |
+| `@tiptap/extension-color` | 3.31.4 | MIT | client |
+| `@tiptap/extension-highlight` | 3.31.4 | MIT | client |
+| `@tiptap/extension-image` | 3.31.4 | MIT | client |
+| `@tiptap/extension-link` | 3.31.4 | MIT | client |
+| `@tiptap/extension-mention` | 3.31.4 | MIT | client |
+| `@tiptap/extension-placeholder` | 3.31.4 | MIT | client |
+| `@tiptap/extension-subscript` | 3.31.4 | MIT | client |
+| `@tiptap/extension-superscript` | 3.31.4 | MIT | client |
+| `@tiptap/extension-table` | 3.31.4 | MIT | client |
+| `@tiptap/extension-table-cell` | 3.31.4 | MIT | client |
+| `@tiptap/extension-table-header` | 3.31.4 | MIT | client |
+| `@tiptap/extension-table-row` | 3.31.4 | MIT | client |
+| `@tiptap/extension-task-item` | 3.31.4 | MIT | client |
+| `@tiptap/extension-task-list` | 3.31.4 | MIT | client |
+| `@tiptap/extension-text-align` | 3.31.4 | MIT | client |
+| `@tiptap/extension-text-style` | 3.31.4 | MIT | client |
+| `@tiptap/extension-underline` | 3.31.4 | MIT | client |
+| `@tiptap/pm` | 3.31.4 | MIT | client |
+| `@tiptap/starter-kit` | 3.31.4 | MIT | client |
+| `bits-ui` | 2.19.5 | MIT | client |
 | `clsx` | 2.1.1 | MIT | client |
-| `cropperjs` | 1.6.2 | MIT | client |
-| `dompurify` | 3.4.12 | (MPL-2.0 OR Apache-2.0) | client |
-| `drizzle-orm` | 0.45.2 | Apache-2.0 | server |
+| `cropperjs` | 1.7.0 | MIT | client |
+| `dompurify` | 3.4.16 | (MPL-2.0 OR Apache-2.0) | client |
+| `drizzle-orm` | 0.45.4 | Apache-2.0 | server |
 | `fastify` | 5.12.5 | MIT | server |
-| `fastify-plugin` | 6.0.0 | MIT | server |
+| `fastify-plugin` | 6.0.1 | MIT | server |
 | `fflate` | 0.8.3 | MIT | client |
 | `hash-wasm` | 4.12.0 | MIT | shared |
-| `idb` | 8.0.3 | ISC | client |
-| `katex` | 0.18.1 | MIT | client |
+| `idb` | 8.0.4 | ISC | client |
+| `katex` | 0.19.0 | MIT | client |
 | `lucide-svelte` | 1.0.1 | ISC | client |
-| `marked` | 18.0.9 | MIT | client |
+| `marked` | 18.1.0 | MIT | client |
 | `minisearch` | 7.2.0 | MIT | client |
 | `ms` | 2.1.3 | MIT | server |
-| `pino` | 10.3.1 | MIT | server |
-| `pino-pretty` | 13.1.3 | MIT | server |
+| `pino` | 10.4.0 | MIT | server |
+| `pino-pretty` | 13.2.0 | MIT | server |
 | `postgres` | 3.4.9 | Unlicense | server |
-| `svelte` | 5.56.7 | MIT | client (development dependency) |
-| `tailwind-merge` | 3.6.0 | MIT | client |
+| `svelte` | 5.57.2 | MIT | client (development dependency) |
+| `tailwind-merge` | 3.7.0 | MIT | client |
 | `tailwindcss` | 4.3.3 | MIT | client (development dependency) |
 | `tippy.js` | 6.3.7 | MIT | client |
 | `uuidv7` | 1.2.1 | Apache-2.0 | client,server |
-| `zod` | 4.4.3 | MIT | shared |
+| `zod` | 4.6.5 | MIT | shared |
 
 ## How this was checked
 
