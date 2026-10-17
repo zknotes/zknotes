@@ -1,6 +1,6 @@
 # ZKnotes Individual Contributor License Agreement
 
-**Version 1.0**
+**Version 1.1**
 
 Thank you for your interest in ZKnotes. To keep the project's licensing coherent, contributions can
 only be accepted from people who have agreed to the terms below. Signing is a one-time step: it
@@ -20,7 +20,9 @@ and can use your contribution however you like, including in other projects.
 
 ## 1. Definitions
 
-**"You"** means the individual who submits a Contribution, or the legal entity authorising it.
+**"You"** means the individual who submits a Contribution and signs this agreement in their own
+name. Only a natural person can sign it; a company or other legal entity cannot, and a Contribution
+made on behalf of one needs the separate agreement described in section 4.
 
 **"Maintainer"** means Janko Diminic, who maintains the Project and holds the copyright to it, and
 any person or legal entity to which this agreement is transferred under section 8.
@@ -60,11 +62,16 @@ Contribution or Project terminate as of the date such litigation is filed.
 
 ## 4. You have the right to grant this
 
-You represent that You are legally entitled to grant the above licences. If Your employer has rights
-to intellectual property You create — which is common — You represent that You have received
-permission to make the Contribution on behalf of that employer, that Your employer has waived such
-rights, or that Your employer has executed a separate corporate agreement with the Maintainer
-(contact: support@zknotes.eu).
+You represent that You are legally entitled to grant the above licences.
+
+If You make a Contribution as part of Your employment, or on behalf of a company or any other legal
+entity, this agreement is not enough on its own. Before You submit it, contact the Maintainer
+(support@zknotes.eu) to put a separate written agreement in place with that employer or entity; the
+Maintainer will not accept such a Contribution without one.
+
+If You make a Contribution on Your own behalf but Your employer may still have rights to
+intellectual property You create — which is common — You represent that Your employer has waived
+those rights for the Contribution or has permitted You to make it under this agreement.
 
 ## 5. Your own work
 
@@ -103,6 +110,12 @@ If the text of this agreement changes, it gets a new version number. Contributio
 under an earlier version stay under the version You signed; a new version applies only to
 Contributions You submit after signing it.
 
+## 10. Governing law
+
+This agreement is governed by the laws of the Republic of Croatia, without regard to its
+conflict-of-law rules. Any dispute arising out of or in connection with it is decided by the
+competent court in Zagreb, Croatia.
+
 ---
 
 ## How to sign
@@ -113,7 +126,7 @@ and the check stays red. To sign, read this agreement and post exactly this sent
 a new comment on the pull request:
 
 ```
-I have read the ZKnotes CLA version 1.0 and I hereby sign it.
+I have read the ZKnotes CLA version 1.1 and I hereby sign it.
 ```
 
 Posting it is Your acceptance of this agreement. It covers the Contributions in that pull request
