@@ -42,6 +42,11 @@ describe("extractPlainText — HTML input", () => {
         expect(result).toContain("'");
     });
 
+    it("an entity typed as text is decoded only once", () => {
+        // The note's text is literally "&lt;b&gt;"; the editor stores it as "&amp;lt;b&amp;gt;".
+        expect(extractPlainText("<p>&amp;lt;b&amp;gt; &amp;amp;</p>")).toBe("&lt;b&gt; &amp;");
+    });
+
     it("several spaces or newlines → one space", () => {
         const result = extractPlainText("<p>a</p><p>b</p>");
         expect(result).toMatch(/^a\s+b$|^a b$/);

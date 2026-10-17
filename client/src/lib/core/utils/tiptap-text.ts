@@ -29,16 +29,19 @@ export function extractPlainText(content: unknown): string {
 function stripHtml(html: string): string {
     // Discard the script/style blocks entirely, then remove everything else.
     // Worker-safe (with no DOMParser dependency).
-    return html
-        .replace(/<(script|style)[\s\S]*?<\/\1>/gi, " ")
-        .replace(/<img\b[^>]*>/gi, " ")
-        .replace(/<[^>]+>/g, " ")
-        .replace(/&nbsp;/g, " ")
-        .replace(/&amp;/g, "&")
-        .replace(/&lt;/g, "<")
-        .replace(/&gt;/g, ">")
-        .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'");
+    return (
+        html
+            .replace(/<(script|style)[\s\S]*?<\/\1>/gi, " ")
+            .replace(/<img\b[^>]*>/gi, " ")
+            .replace(/<[^>]+>/g, " ")
+            .replace(/&nbsp;/g, " ")
+            .replace(/&lt;/g, "<")
+            .replace(/&gt;/g, ">")
+            .replace(/&quot;/g, '"')
+            .replace(/&#39;/g, "'")
+            // Last, so that the text "&lt;" (stored as "&amp;lt;") stays "&lt;" and is not decoded twice.
+            .replace(/&amp;/g, "&")
+    );
 }
 
 interface TipTapNode {

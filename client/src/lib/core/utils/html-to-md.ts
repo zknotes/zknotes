@@ -112,6 +112,9 @@ function tableToMd(table: HTMLElement): string {
         const cells = [...row.querySelectorAll("th,td")].map((c) =>
             childrenToMd(c as HTMLElement)
                 .trim()
+                // Backslashes right before a pipe are doubled first, or "a\|b" would become
+                // "a\\|b", where the backslash escapes itself and the pipe splits the cell.
+                .replace(/\\+(?=\|)/g, "$&$&")
                 .replace(/\|/g, "\\|"),
         );
         lines.push(`| ${cells.join(" | ")} |`);

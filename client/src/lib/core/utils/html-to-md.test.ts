@@ -111,4 +111,17 @@ describe("htmlToMarkdown — the rest", () => {
         const result = htmlToMarkdown(html);
         expect(result).toContain("A\\|B");
     });
+
+    it("backslashes before a pipe in a table are escaped too, so the pipe cannot split the cell", () => {
+        // Cell text: a\|b and c\\|d — each literal backslash becomes \\, the pipe becomes \|.
+        const html = "<table><tr><th>a\\|b</th><th>c\\\\|d</th></tr></table>";
+        const result = htmlToMarkdown(html);
+        expect(result).toContain("| a\\\\\\|b | c\\\\\\\\\\|d |");
+    });
+
+    it("backslashes not before a pipe stay as they are", () => {
+        const html = "<table><tr><td>C:\\temp</td><td><code>C:\\temp</code></td></tr></table>";
+        const result = htmlToMarkdown(html);
+        expect(result).toContain("| C:\\temp | `C:\\temp` |");
+    });
 });

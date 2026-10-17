@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+### Fixed
+
+- Markdown export: a table cell whose text has a backslash right before a pipe (`a\|b`) stays one
+  cell instead of splitting in two.
+- Search: text that looks like an HTML entity, such as `&lt;` typed into a note, is indexed as typed
+  instead of as `<`.
+
 ## [0.2.0] - 2026-10-17
 
 ### Added

@@ -87,6 +87,8 @@ self.addEventListener("install", (event) => {
 });
 
 self.addEventListener("message", (event) => {
+    // Only pages of this origin can reach a service worker today; the check keeps it that way.
+    if (event.origin !== self.location.origin) return;
     if (event.data && event.data.type === "SKIP_WAITING") {
         self.skipWaiting();
     }

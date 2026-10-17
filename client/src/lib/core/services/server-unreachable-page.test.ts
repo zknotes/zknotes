@@ -20,8 +20,8 @@ describe("server unreachable page", () => {
 
     it("loads nothing from the server — every style and script is inline", () => {
         const html = renderServerUnreachablePage("n0nce");
-        expect(html).not.toMatch(/\s(src|href)=/);
-        expect(html).not.toMatch(/<link\b/);
+        expect(html).not.toMatch(/\s(src|href)=/i);
+        expect(html).not.toMatch(/<link\b/i);
     });
 
     it("its inline style and script carry the nonce its CSP allows, and nothing else runs", () => {
@@ -33,13 +33,13 @@ describe("server unreachable page", () => {
         expect(csp).toContain("style-src 'nonce-n0nce'");
         expect(csp).not.toContain("unsafe-inline");
 
-        const scripts = html.match(/<script\b[^>]*>/g) ?? [];
-        const styles = html.match(/<style\b[^>]*>/g) ?? [];
+        const scripts = html.match(/<script\b[^>]*>/gi) ?? [];
+        const styles = html.match(/<style\b[^>]*>/gi) ?? [];
         expect(scripts).toEqual(['<script nonce="n0nce">']);
         expect(styles).toEqual(['<style nonce="n0nce">']);
         // No inline event handlers or style attributes — the CSP would block them silently.
-        expect(html).not.toMatch(/\son[a-z]+=/);
-        expect(html).not.toMatch(/\sstyle=/);
+        expect(html).not.toMatch(/\son[a-z]+=/i);
+        expect(html).not.toMatch(/\sstyle=/i);
     });
 
     it("is answered as an uncacheable 503 with a fresh nonce each time", async () => {
