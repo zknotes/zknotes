@@ -42,7 +42,7 @@ RUN HASHES="$(bun /tmp/csp/extract-csp-script-hashes.ts /app/client/build/index.
     && echo "CSP script hashes: ${HASHES}"
 
 # ── Runtime image ──────────────────────────────────────────────────────────────
-FROM nginx:1.27-alpine
+FROM nginx:1.29-alpine
 
 COPY --from=builder /app/client/build /usr/share/nginx/html
 # The official nginx image: *.template in /etc/nginx/templates → envsubst at startup.
