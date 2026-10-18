@@ -10,6 +10,13 @@
 #
 # PostgreSQL major versions are ignored too: a new major cannot open the previous one's data
 # directory, so it needs a dump-and-restore upgrade, never a tag bump.
+#
+# Cropper.js 2 is a different library under the same name — web components instead of the Cropper
+# class the crop dialog (client/src/lib/modules/files/CropModal.svelte) is written against — and
+# 1.x is still maintained alongside it, so only its 2.x major is ignored; 1.x updates still come.
+#
+# SvelteKit 3 and adapter-static 4 (which needs it) are held back until the move planned in issue
+# #18; their 2.x and 3.x updates still come.
 
 version: 2
 updates:
@@ -22,6 +29,13 @@ updates:
     groups:
       minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      - dependency-name: cropperjs
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@sveltejs/kit"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@sveltejs/adapter-static"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /
