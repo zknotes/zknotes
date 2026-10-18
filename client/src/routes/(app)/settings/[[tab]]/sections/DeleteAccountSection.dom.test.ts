@@ -17,6 +17,9 @@ vi.mock("$lib/core/services/auth-service", () => ({
 
 const { getMe } = await import("$lib/core/api/auth");
 const { performDeleteAccount } = await import("$lib/core/services/auth-service");
+const { captureExpectedVaultEmailOnArrival, DELETE_VAULT_PATH } = await import(
+    "$lib/core/stores/delete-vault-expected"
+);
 const { default: DeleteAccountSection } = await import("./DeleteAccountSection.svelte");
 
 const STORAGE_KEY = "cn_delete_vault_expected_email";
@@ -82,6 +85,17 @@ describe("Delete vault — the vault the caller came for", () => {
         expect(textOf(mismatch(root))).toContain("b@x");
         expect(buttonByText(root, "Delete vault…").disabled).toBe(true);
         expect(sessionStorage.getItem(STORAGE_KEY)).toBe("a@x");
+    });
+
+    it("AC2 (signed-out arrival): the layout captures the fragment before the sign-in redirect, and the section finds it later without any fragment", async () => {
+        // What (app)/+layout.svelte does on arrival — the section itself never mounts while the
+        // vault is locked, so this is the only place the address can be read in that case.
+        captureExpectedVaultEmailOnArrival({ pathname: DELETE_VAULT_PATH, hash: "#email=a%40x" });
+        // …sign-in happened, the user navigated to Settings → Delete vault by hand: no fragment.
+        signedInAs("b@x");
+        const root = await render();
+        expect(mismatch(root)).not.toBeNull();
+        expect(buttonByText(root, "Delete vault…").disabled).toBe(true);
     });
 
     it("AC2: without a fragment the remembered address still applies, and a matching vault lifts the block", async () => {

@@ -61,3 +61,23 @@ export function resolveExpectedVaultEmail(hash: string): string | undefined {
     }
     return loadExpectedVaultEmail();
 }
+
+/** The Settings path whose fragment may name a vault. */
+export const DELETE_VAULT_PATH = "/settings/delete-account";
+
+/**
+ * Capture the address the moment the app loads, before anything else happens to the URL.
+ *
+ * The app layout renders its pages only while the vault is unlocked and sends a signed-out browser
+ * to sign in, which drops the fragment — so for exactly the user the check exists for (came from the
+ * account area, not signed in here, or signed in to the wrong vault and about to sign out) the
+ * section itself never gets to read it. The layout calls this on arrival instead; other paths are
+ * ignored so an unrelated fragment is never mistaken for a vault address.
+ */
+export function captureExpectedVaultEmailOnArrival(location: {
+    pathname: string;
+    hash: string;
+}): void {
+    if (location.pathname !== DELETE_VAULT_PATH) return;
+    resolveExpectedVaultEmail(location.hash);
+}

@@ -24,6 +24,7 @@ import { performLogout, restoreSession } from "$lib/core/services/session-servic
 import { activeSidebarId } from "$lib/core/stores/active-sidebar-id.svelte";
 import { authStore } from "$lib/core/stores/auth-store.svelte";
 import { type ConflictEntry, conflictStore } from "$lib/core/stores/conflict-store.svelte";
+import { captureExpectedVaultEmailOnArrival } from "$lib/core/stores/delete-vault-expected";
 import { pendingRenameId } from "$lib/core/stores/pending-rename.svelte";
 import { recentNotesStore } from "$lib/core/stores/recent-notes.svelte";
 import { utilityReturnStore } from "$lib/core/stores/utility-return.svelte";
@@ -294,6 +295,10 @@ onMount(() => {
     // can unmount (logout, a route out of (app)) before it reaches startBackground() — the
     // scheduler refuses to start after stop(), and this flag stops the rest of the sequence too.
     let unmounted = false;
+    // Settings → Delete vault may arrive with the vault's address in the fragment (from the account
+    // area). The sign-in redirect below drops the fragment and the section never mounts while the
+    // vault is locked, so the address is remembered here, before anything else touches the URL.
+    captureExpectedVaultEmailOnArrival(window.location);
     (async () => {
         // The root +layout.svelte has already run restoreSession() in its onMount.
         if (!authStore.isVaultUnlocked) {
