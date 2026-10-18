@@ -73,6 +73,34 @@ test.describe("Authentication", () => {
         await expect(submit).toBeEnabled();
     });
 
+    // A weak vault password is advised against, never refused: the first attempt stops to warn,
+    // the second one creates the vault — one warning, not more.
+    test("create-vault warns once about a weak password, then creates the vault", async ({
+        page,
+    }) => {
+        const password = "tulip";
+
+        await page.goto("/create-vault");
+        await page.getByPlaceholder("Email Address").fill(uniqueEmail());
+        const pwInputs = page.locator('input[type="password"]');
+        await pwInputs.nth(0).fill(password);
+        await expect(page.getByTestId("password-strength")).toContainText("Weak");
+        await pwInputs.nth(1).fill(password);
+        await page.getByTestId("accept-dataloss").check();
+
+        const submit = page.getByRole("button", { name: /Create Secure Vault/i });
+        const warning = page.getByTestId("weak-password-warning");
+        await expect(warning).toHaveCount(0);
+
+        await submit.click();
+        await expect(warning).toBeVisible();
+        expect(page.url()).toContain("/create-vault");
+
+        // The Argon2id derivation runs client-side; allow up to 60s for slow CI machines.
+        await submit.click();
+        await page.waitForURL(/\/login/, { timeout: 60_000 });
+    });
+
     // Regression: the link pointed at `/register`, a route that does not exist — on a self-host the
     // only way to reach vault creation was typing the address by hand. The destination is a runtime
     // decision (`/instance-config` + `/auth/registration-status`), and this covers the self-host

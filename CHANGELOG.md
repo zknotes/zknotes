@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+### Added
+
+- Choosing a master password, when creating the vault or changing the password, now shows advice
+  and a strength meter (weak, fair, strong). The meter counts length most, credits a mix of
+  capitals, numbers and symbols, and marks well-known passwords and patterns like `1234` as weak.
+  It never refuses a password: a weak one gets a single warning above the button, and pressing the
+  button again keeps it.
+
 ### Fixed
 
 - Markdown export: a table cell whose text has a backslash right before a pipe (`a\|b`) stays one
