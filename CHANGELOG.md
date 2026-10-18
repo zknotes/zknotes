@@ -13,6 +13,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
   It never refuses a password: a weak one gets a single warning above the button, and pressing the
   button again keeps it.
 
+### Changed
+
+- Settings: the "Delete Account" tab is now called "Delete vault", and its text says what it
+  does — delete this vault and everything in it. On the hosted service the account that owns the
+  vault is a separate thing and is deleted separately; on a self-hosted instance the vault is the
+  whole account, so the new name is accurate in both cases. Nothing else changed: same route,
+  same password confirmation, same effect.
+
 ### Fixed
 
 - Markdown export: a table cell whose text has a backslash right before a pipe (`a\|b`) stays one

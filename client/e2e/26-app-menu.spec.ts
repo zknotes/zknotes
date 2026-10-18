@@ -80,19 +80,19 @@ test.describe("Sidebar app menu", () => {
         await expect(menu).not.toBeVisible();
     });
 
-    test("Settings remembers the last visited tab, but not Delete Account", async ({ page }) => {
+    test("Settings remembers the last visited tab, but not Delete vault", async ({ page }) => {
         const trigger = page.getByTitle("Settings and preferences");
         const menu = page.locator(".ctx-menu");
 
         // Visit Appearance (a legitimate "last tab").
         await page.goto("/settings/appearance");
-        // Visit Delete Account — it must not become the remembered tab.
+        // Visit Delete vault — it must not become the remembered tab.
         // The page renders both the mobile and the desktop navigation (CSS-hidden, not removed from
         // the DOM) — scope to the desktop <nav> (the last in DOM order) to avoid strict mode.
         await page
             .getByRole("navigation")
             .last()
-            .getByRole("link", { name: "Delete Account" })
+            .getByRole("link", { name: "Delete vault" })
             .click();
         await expect(page).toHaveURL(/\/settings\/delete-account/);
 

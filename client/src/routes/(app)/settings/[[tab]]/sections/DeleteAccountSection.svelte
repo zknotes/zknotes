@@ -35,15 +35,15 @@ async function deleteAccount() {
 </script>
 
 <div class="mb-8">
-    <h1 class="text-2xl font-bold text-[var(--text)]">Delete Account</h1>
-    <p class="text-[var(--text-muted)] mt-1 text-sm">Permanently remove your account and all data</p>
+    <h1 class="text-2xl font-bold text-[var(--text)]">Delete vault</h1>
+    <p class="text-[var(--text-muted)] mt-1 text-sm">Permanently remove this vault and everything in it</p>
 </div>
 
 <div class="divide-y divide-[var(--stroke)]">
 <SettingsCard
     tone="destructive"
     title="This is permanent"
-    description="Deletes all your notes, files, and account data. There is no way to undo this."
+    description="Deletes all your notes, files and settings in this vault. There is no way to undo this."
 >
     {#snippet icon()}
         <Trash2 class="w-6 h-6" />
@@ -53,7 +53,7 @@ async function deleteAccount() {
             variant="danger-ghost"
             size="lg"
             onclick={() => (showDeleteSection = true)}
-        >Delete account…</Button>
+        >Delete vault…</Button>
     {:else}
         <div class="space-y-4 mt-4">
             {#if deleteError}
@@ -91,7 +91,7 @@ async function deleteAccount() {
                     {#if deleteWorking}
                         <Loader2 class="w-4 h-4 animate-spin" /> Deleting…
                     {:else}
-                        <Trash2 class="w-4 h-4" /> Permanently delete account
+                        <Trash2 class="w-4 h-4" /> Permanently delete vault
                     {/if}
                 </Button>
                 <Button

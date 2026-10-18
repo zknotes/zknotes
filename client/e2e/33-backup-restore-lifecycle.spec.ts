@@ -135,10 +135,10 @@ test.describe("A — a restore on a cold device", () => {
         // different account in the same database would fail on a unique violation — which is not the
         // "fresh second account" scenario. Deleting the source frees the IDs (ON DELETE CASCADE).
         await sourcePage.goto("/settings/delete-account");
-        await sourcePage.getByRole("button", { name: /Delete account/ }).click();
+        await sourcePage.getByRole("button", { name: /Delete vault/ }).click();
         await sourcePage.getByPlaceholder("Enter your password to confirm").fill(PASSWORD);
         await sourcePage.locator("#delete-confirm").fill("DELETE");
-        await sourcePage.getByRole("button", { name: /Permanently delete account/ }).click();
+        await sourcePage.getByRole("button", { name: /Permanently delete vault/ }).click();
         await sourcePage.waitForURL(/\/login/, { timeout: 30_000 });
     });
 

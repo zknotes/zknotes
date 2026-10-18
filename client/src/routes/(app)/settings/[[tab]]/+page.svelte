@@ -35,7 +35,7 @@ const tabs = [
     { id: "backup", label: "Backup & Export", icon: HardDriveDownload },
     { id: "preferences", label: "Preferences", icon: SlidersHorizontal },
     { id: "app-info", label: "About", icon: Info },
-    { id: "delete-account", label: "Delete Account", icon: Trash2 },
+    { id: "delete-account", label: "Delete vault", icon: Trash2 },
 ] as const satisfies readonly TabDef[];
 
 type TabId = (typeof tabs)[number]["id"];
