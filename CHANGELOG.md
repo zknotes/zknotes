@@ -23,6 +23,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ### Fixed
 
+- Settings → Delete vault now says which vault it deletes (the address you are signed in as), and
+  when you arrive from the account area it refuses to delete a different vault than the one you
+  came for — the browser may be signed in to another vault, because the account area and the app
+  keep separate sessions. After the deletion on a hosted instance the app takes you back to your
+  account instead of to the sign-in screen, where there was nothing left to sign in to.
 - Markdown export: a table cell whose text has a backslash right before a pipe (`a\|b`) stays one
   cell instead of splitting in two.
 - Search: text that looks like an HTML entity, such as `&lt;` typed into a note, is indexed as typed

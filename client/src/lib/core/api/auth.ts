@@ -13,6 +13,8 @@ export interface KdfMetadata {
 
 /** The extended /auth/me and /auth/login response, which carries the Vault Key fields too. */
 export interface KdfMetadataWithVaultKey extends KdfMetadata {
+    /** The signed-in vault's address — shown wherever the user must know *which* vault they act on. */
+    email?: string;
     encrypted_vault_key: string;
     vault_key_nonce: string;
 }
