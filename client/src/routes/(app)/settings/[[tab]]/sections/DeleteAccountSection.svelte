@@ -6,6 +6,10 @@ import { getMe } from "$lib/core/api/auth";
 import { SettingsCard } from "$lib/core/ui";
 import { loadInstancePublicConfig } from "$lib/core/constants/public-www";
 import { performDeleteAccount } from "$lib/core/services/auth-service";
+import {
+    clearExpectedVaultEmail,
+    resolveExpectedVaultEmail,
+} from "$lib/core/stores/delete-vault-expected";
 import Button from "$lib/core/ui/Button.svelte";
 
 let deletePassword = $state("");
@@ -17,30 +21,48 @@ const DELETE_CONFIRM = "DELETE";
 
 // Which vault this screen deletes. The browser may be signed in to a different vault than the one
 // the user has in mind — on a hosted instance the account origin and this origin keep separate
-// sessions — so the address is shown, and when the caller says which vault it expects
-// (`#email=…` in the fragment, which never reaches the server) a mismatch blocks the deletion.
+// sessions — so the address is shown, and when the caller says which vault it expects (`#email=…`
+// in the fragment, remembered for the tab so it survives the sign-in redirect, signing out and back
+// in, and tab switches) a mismatch blocks the deletion. While the caller named a vault, not knowing
+// which vault this browser holds blocks it too: a failed `getMe()` must not switch the check off.
 let vaultEmail = $state<string | undefined>();
+let vaultEmailFailed = $state(false);
 let expectedEmail = $state<string | undefined>();
 const wrongVault = $derived(
     !!expectedEmail && !!vaultEmail && expectedEmail.toLowerCase() !== vaultEmail.toLowerCase(),
 );
+const unconfirmedVault = $derived(!!expectedEmail && vaultEmail === undefined);
+const blocked = $derived(wrongVault || unconfirmedVault);
+
+async function loadVaultEmail(): Promise<void> {
+    vaultEmailFailed = false;
+    try {
+        vaultEmail = (await getMe()).email;
+    } catch {
+        vaultEmail = undefined;
+        vaultEmailFailed = true;
+    }
+}
+
+// The user changed their mind: the vault this browser holds is the one to delete after all.
+function forgetExpectedVault(): void {
+    clearExpectedVaultEmail();
+    expectedEmail = undefined;
+}
 
 onMount(() => {
-    const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ""));
-    expectedEmail = fragment.get("email")?.trim() || undefined;
-    getMe()
-        .then((me) => {
-            vaultEmail = me.email;
-        })
-        .catch(() => {
-            vaultEmail = undefined;
-        });
+    expectedEmail = resolveExpectedVaultEmail(window.location.hash);
+    void loadVaultEmail();
 });
 
 async function deleteAccount() {
     deleteError = "";
     if (wrongVault) {
         deleteError = `This browser is signed in to the vault for ${vaultEmail}, not ${expectedEmail}.`;
+        return;
+    }
+    if (unconfirmedVault) {
+        deleteError = "We could not confirm which vault this browser is signed in to. Retry first.";
         return;
     }
     if (deleteConfirmText !== DELETE_CONFIRM) {
@@ -60,6 +82,8 @@ async function deleteAccount() {
         // account layer, so it goes to the sign-in screen as before.
         const manageUrl = (await loadInstancePublicConfig()).account?.manageUrl;
         await performDeleteAccount(deletePassword);
+        // The expectation is met; a later visit in this tab must not carry it over.
+        clearExpectedVaultEmail();
         if (manageUrl) {
             window.location.assign(manageUrl);
         } else {
@@ -93,17 +117,40 @@ async function deleteAccount() {
         </p>
     {/if}
     {#if wrongVault}
-        <div class="p-3 bg-[var(--danger)]/10 text-[var(--danger)] text-sm rounded-xl border border-[var(--danger)]/20 mb-3">
-            You came here to delete the vault for <strong>{expectedEmail}</strong>, but this browser is
-            signed in to the vault for <strong>{vaultEmail}</strong>. Sign out, sign in to
-            {expectedEmail}, then come back.
+        <div
+            class="p-3 bg-[var(--danger)]/10 text-[var(--danger)] text-sm rounded-xl border border-[var(--danger)]/20 mb-3"
+            data-testid="delete-vault-mismatch"
+        >
+            <p>
+                You came here to delete the vault for <strong>{expectedEmail}</strong>, but this browser is
+                signed in to the vault for <strong>{vaultEmail}</strong>. Sign out, sign in to
+                {expectedEmail}, then come back — this page remembers which vault you came for.
+            </p>
+            <div class="mt-2">
+                <Button variant="normal" size="sm" onclick={forgetExpectedVault}>
+                    I came for {vaultEmail} after all
+                </Button>
+            </div>
+        </div>
+    {:else if unconfirmedVault && vaultEmailFailed}
+        <div
+            class="p-3 bg-[var(--danger)]/10 text-[var(--danger)] text-sm rounded-xl border border-[var(--danger)]/20 mb-3"
+            data-testid="delete-vault-unconfirmed"
+        >
+            <p>
+                You came here to delete the vault for <strong>{expectedEmail}</strong>, but we could not
+                confirm which vault this browser is signed in to, so nothing can be deleted yet.
+            </p>
+            <div class="mt-2">
+                <Button variant="normal" size="sm" onclick={() => void loadVaultEmail()}>Retry</Button>
+            </div>
         </div>
     {/if}
     {#if !showDeleteSection}
         <Button
             variant="danger-ghost"
             size="lg"
-            disabled={wrongVault}
+            disabled={blocked}
             onclick={() => (showDeleteSection = true)}
         >Delete vault…</Button>
     {:else}
@@ -138,7 +185,7 @@ async function deleteAccount() {
                     variant="danger"
                     size="lg"
                     onclick={deleteAccount}
-                    disabled={wrongVault || deleteWorking || deleteConfirmText !== DELETE_CONFIRM || !deletePassword}
+                    disabled={blocked || deleteWorking || deleteConfirmText !== DELETE_CONFIRM || !deletePassword}
                 >
                     {#if deleteWorking}
                         <Loader2 class="w-4 h-4 animate-spin" /> Deleting…
