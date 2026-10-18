@@ -9,7 +9,10 @@ import { goto } from "$app/navigation";
 import { isServerUnreachableError } from "$lib/core/api/client";
 import Button from "$lib/core/ui/Button.svelte";
 import LegalFooter from "$lib/core/ui/LegalFooter.svelte";
+import PasswordStrength from "$lib/core/ui/PasswordStrength.svelte";
+import WeakPasswordWarning from "$lib/core/ui/WeakPasswordWarning.svelte";
 import { performCreateVault } from "$lib/core/services/auth-service";
+import { passwordStrength } from "$lib/core/utils/password-strength";
 import { onMount } from "svelte";
 
 let email = $state("");
@@ -18,6 +21,10 @@ let confirmPassword = $state("");
 let dataLossAcknowledged = $state(false);
 let submitting = $state(false);
 let error = $state<string | null>(null);
+/** Set by the first attempt with a weak password; the next attempt goes through. */
+let weakPasswordWarned = $state(false);
+
+const SUBMIT_LABEL = "Create Secure Vault";
 
 /**
  * The pass arrives in the **fragment** (`#token=…`), not in the query string: a fragment never
@@ -40,18 +47,25 @@ const canSubmit = $derived(
     !submitting &&
         email.trim().length > 3 &&
         // A deliberately low floor — the form refuses an empty-ish entry and leaves the rest to
-        // whoever creates the vault. This line is the whole rule: the server never sees the password
-        // (it receives only the derived auth key), so nothing else can enforce a length. Worth
-        // knowing before raising or lowering it: the password IS the key (Argon2id → master key),
-        // and there is no reset and no recovery, so a short one is a weak vault.
+        // whoever creates the vault. This line is the whole hard rule: the server never sees the
+        // password (it receives only the derived auth key), so nothing else can enforce a length.
+        // Worth knowing before raising or lowering it: the password IS the key (Argon2id → master
+        // key), and there is no reset and no recovery, so a short one is a weak vault. Above the
+        // floor the form only advises — the strength meter, and one warning about a weak password.
         password.length >= 2 &&
         passwordsMatch &&
         dataLossAcknowledged,
 );
+const weakPassword = $derived(passwordStrength(password).level === "weak");
 
 async function submit(event: SubmitEvent) {
     event.preventDefault();
     if (!canSubmit) return;
+    // One warning, never more: the first attempt with a weak password stops here to show it.
+    if (weakPassword && !weakPasswordWarned) {
+        weakPasswordWarned = true;
+        return;
+    }
     submitting = true;
     error = null;
     try {
@@ -93,9 +107,11 @@ async function submit(event: SubmitEvent) {
             type="password"
             placeholder="Master Password"
             autocomplete="new-password"
+            aria-describedby="vault-password-strength"
             bind:value={password}
             required
         />
+        <PasswordStrength {password} id="vault-password-strength" />
         <input
             class="input w-full"
             type="password"
@@ -128,12 +144,16 @@ async function submit(event: SubmitEvent) {
             </span>
         </label>
 
+        {#if weakPasswordWarned && weakPassword}
+            <WeakPasswordWarning actionLabel={SUBMIT_LABEL} />
+        {/if}
+
         {#if error}
             <p class="text-sm text-[var(--danger)]" data-testid="create-vault-error">{error}</p>
         {/if}
 
         <Button variant="primary" type="submit" disabled={!canSubmit} class="w-full">
-            {submitting ? "Creating your vault…" : "Create Secure Vault"}
+            {submitting ? "Creating your vault…" : SUBMIT_LABEL}
         </Button>
     </form>
     <LegalFooter class="text-center" />

@@ -3,9 +3,12 @@ import { CreditCard, ExternalLink, KeyRound, Loader2 } from "lucide-svelte";
 import { onMount } from "svelte";
 import { SettingsCard } from "$lib/core/ui";
 import Button from "$lib/core/ui/Button.svelte";
+import PasswordStrength from "$lib/core/ui/PasswordStrength.svelte";
+import WeakPasswordWarning from "$lib/core/ui/WeakPasswordWarning.svelte";
 import { getStorage } from "$lib/core/api/files";
 import { loadInstancePublicConfig } from "$lib/core/constants/public-www";
 import { performChangePassword } from "$lib/core/services/auth-service";
+import { passwordStrength } from "$lib/core/utils/password-strength";
 
 let currentPassword = $state("");
 let newPassword = $state("");
@@ -17,6 +20,11 @@ let isWorking = $state(false);
 let progressMessage = $state("");
 let understandConsequences = $state(false);
 let showDownloadPrompt = $state(false);
+/** Set by the first attempt with a weak new password; the next attempt goes through. */
+let weakPasswordWarned = $state(false);
+const weakPassword = $derived(passwordStrength(newPassword).level === "weak");
+
+const SUBMIT_LABEL = "Change password";
 
 // The vault may show only the plan's label and a link to the account. A self-hosted instance has
 // neither, so it shows no plan at all — not a loading state, not an error about a plan it never had.
@@ -58,6 +66,12 @@ async function changePassword() {
         error = "New passwords do not match";
         return;
     }
+    // One warning, never more: the first attempt with a weak password stops here to show it.
+    if (weakPassword && !weakPasswordWarned) {
+        weakPasswordWarned = true;
+        error = "";
+        return;
+    }
 
     error = "";
     success = false;
@@ -77,6 +91,7 @@ async function changePassword() {
         newPassword = "";
         confirmPassword = "";
         understandConsequences = false;
+        weakPasswordWarned = false;
     } catch (e: unknown) {
         error = e instanceof Error ? e.message : "An error occurred";
     } finally {
@@ -187,11 +202,13 @@ async function changePassword() {
                     id="newPassword"
                     type="password"
                     autocomplete="new-password"
+                    aria-describedby="new-password-strength"
                     bind:value={newPassword}
                     disabled={isWorking}
                     class="input w-full"
                     placeholder="New password"
                 />
+                <PasswordStrength password={newPassword} id="new-password-strength" class="mt-2 ml-1" />
             </div>
             <div>
                 <label for="confirmPassword" class="block text-sm font-medium text-[var(--text)] mb-1.5 ml-1">Confirm new password</label>
@@ -224,7 +241,10 @@ async function changePassword() {
             </p>
         </div>
 
-        <div class="pt-4">
+        <div class="pt-4 space-y-4">
+            {#if weakPasswordWarned && weakPassword}
+                <WeakPasswordWarning actionLabel={SUBMIT_LABEL} />
+            {/if}
             <Button
                 variant="primary"
                 type="submit"
@@ -236,7 +256,7 @@ async function changePassword() {
                     <Loader2 class="w-5 h-5 animate-spin" />
                     <span>{progressMessage}</span>
                 {:else}
-                    Change password
+                    {SUBMIT_LABEL}
                 {/if}
             </Button>
         </div>
