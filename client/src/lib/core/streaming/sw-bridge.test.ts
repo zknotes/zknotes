@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { __resetServiceWorkerRegistrationForTest } from "$lib/core/services/sw-update";
 
 const { getFilePayload } = vi.hoisted(() => ({ getFilePayload: vi.fn() }));
 
@@ -58,6 +59,7 @@ function installEnv(opts: {
 }
 
 beforeEach(() => {
+    __resetServiceWorkerRegistrationForTest();
     vi.spyOn(console, "warn").mockImplementation(() => {});
 });
 

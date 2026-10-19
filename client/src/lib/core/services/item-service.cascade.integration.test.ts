@@ -3,11 +3,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock the side-effect infrastructure — we are testing the cascade lifecycle (the IDB state), not the network, crypto or index.
 vi.mock("$lib/core/api", () => ({ pushBatch: vi.fn().mockResolvedValue(undefined) }));
-vi.mock("$lib/core/sync", () => ({
-    pushItem: vi.fn().mockResolvedValue(undefined),
-    pushDeletes: vi.fn().mockResolvedValue(undefined),
-    enqueueMutation: vi.fn().mockResolvedValue(undefined),
-}));
+vi.mock("$lib/core/sync", () => {
+    const pushItem = vi.fn().mockResolvedValue(undefined);
+    return {
+        pushDeletes: vi.fn().mockResolvedValue(undefined),
+        enqueueMutation: vi.fn().mockResolvedValue(undefined),
+        pushItem,
+        // The service pushes through pushOrQueue; assertions on pushItem keep counting.
+        pushOrQueue: vi.fn((item: unknown) => {
+            void pushItem(item);
+        }),
+    };
+});
 vi.mock("$lib/core/search", () => ({
     addOrUpdateDoc: vi.fn().mockResolvedValue(undefined),
     removeDoc: vi.fn().mockResolvedValue(undefined),

@@ -23,7 +23,8 @@ vi.mock("$lib/core/workers/crypto-rpc", () => ({
         itemKeyNonce: new Uint8Array([10, 11, 12]),
     }),
 }));
-vi.mock("./outbox", () => ({
+vi.mock("./outbox", async (importOriginal) => ({
+    ...(await importOriginal<Record<string, unknown>>()),
     enqueueMutation: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("$lib/core/stores/conflict-store.svelte", () => ({

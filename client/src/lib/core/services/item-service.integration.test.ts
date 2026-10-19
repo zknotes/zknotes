@@ -26,15 +26,23 @@ const {
 
 vi.mock("$lib/core/api", () => ({ pushBatch: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("$lib/core/crypto/session-key", () => ({ isVaultSessionCurrent }));
-vi.mock("$lib/core/sync", () => ({
-    pushItem: vi.fn().mockResolvedValue(undefined),
-    pushDeletes: vi.fn().mockResolvedValue(undefined),
-    enqueueMutation: vi.fn().mockResolvedValue(undefined),
-}));
+vi.mock("$lib/core/sync", () => {
+    const pushItem = vi.fn().mockResolvedValue(undefined);
+    return {
+        pushItem,
+        // The service pushes through pushOrQueue; the assertions below still count pushItem calls.
+        pushOrQueue: vi.fn((item: unknown) => {
+            void pushItem(item);
+        }),
+        pushDeletes: vi.fn().mockResolvedValue(undefined),
+        enqueueMutation: vi.fn().mockResolvedValue(undefined),
+    };
+});
 vi.mock("$lib/core/events/file-bridge", () => ({
     fileBridge: { invalidateFile: vi.fn().mockResolvedValue(undefined) },
 }));
-vi.mock("$lib/core/sync/conflict", () => ({
+vi.mock("$lib/core/sync/conflict", async (importOriginal) => ({
+    ...(await importOriginal<Record<string, unknown>>()),
     createLocalConflictCopyFromPayload,
     replaceConflictCopyContent,
 }));

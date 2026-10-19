@@ -7,7 +7,7 @@
 // The methods are decorated (wrapped) when the orchestrator loads (through register-bridge) — which
 // gives a pin/unpin from core/ui/FolderItem and one from a module identical side effects.
 
-import { STORAGE_KEYS } from "$lib/core/utils/persisted";
+import { loadPersisted, savePersisted, STORAGE_KEYS } from "$lib/core/utils/persisted";
 
 const PIN_STORE_KEY = STORAGE_KEYS.pinnedItems;
 
@@ -16,20 +16,13 @@ class PinManager {
     roots = $state<string[]>([]);
 
     constructor() {
-        if (typeof window !== "undefined") {
-            try {
-                const val = localStorage.getItem(PIN_STORE_KEY);
-                if (val) this.roots = JSON.parse(val);
-            } catch {
-                this.roots = [];
-            }
-        }
+        // JSON string[]; a corrupt value or a blocked storage reads as "nothing pinned".
+        const stored = loadPersisted<unknown>(PIN_STORE_KEY, []);
+        this.roots = Array.isArray(stored) ? stored.filter((v) => typeof v === "string") : [];
     }
 
     private save() {
-        if (typeof window !== "undefined") {
-            localStorage.setItem(PIN_STORE_KEY, JSON.stringify(this.roots));
-        }
+        savePersisted(PIN_STORE_KEY, this.roots);
     }
 
     isPinned(id: string): boolean {

@@ -3,7 +3,7 @@
 // batch splitting and its recovery paths.
 import { type DeleteId, FILE_LIMITS, SYNC_LIMITS, topoSortByParent } from "@zknotes/shared";
 import { ApiError, pushBatch } from "$lib/core/api";
-import { APP_EVENTS } from "$lib/core/constants/events";
+import { emitVaultItemsChanged } from "$lib/core/constants/events";
 import type { EncryptedItem, LocalItem, MutationQueueItem } from "$lib/core/db";
 import { getDB } from "$lib/core/db";
 import { fileBridge } from "$lib/core/events/file-bridge";
@@ -11,7 +11,7 @@ import { evictChunkSet } from "$lib/core/files/chunk-loader";
 import { removeDoc } from "$lib/core/search";
 import { conflictStore } from "$lib/core/stores/conflict-store.svelte";
 import { loadPersisted, rawStringSerde, STORAGE_KEYS } from "$lib/core/utils/persisted";
-import { createConflictCopyForItem } from "./conflict";
+import { announceConflictCopy, createConflictCopyForItem } from "./conflict";
 import { type DB, enqueueMutation, notifyQueueChanged, shouldRetry } from "./outbox";
 import { applyDeleteRejected, applyPushResult } from "./push-result";
 import { syncStore } from "./store.svelte";
@@ -151,6 +151,11 @@ let pushLock = Promise.resolve();
  * - a per-tab `pushLock` (the same tab, fire-and-forget chains)
  * - a cross-tab Web Lock (`withSyncLock`), so a foreground push does not race another tab's drain
  */
+/** Push now; when that fails (offline, a server error) leave the change to the outbox drain. */
+export function pushOrQueue(item: LocalItem): void {
+    pushItem(item).catch(() => enqueueMutation(item.id, "upsert"));
+}
+
 export function pushItem(item: LocalItem): Promise<void> {
     // During a bulk import, or while a user switch is pending, only enqueue — do not hit the network.
     if (syncStore.isSuspended || isUserSwitchPending()) {
@@ -277,9 +282,7 @@ async function _pushItemImpl(itemId: string): Promise<void> {
             }
             void syncStore.refreshPendingCount();
             // Refresh the tree: dirty just turned false in IDB, so the spinner should disappear.
-            if (typeof window !== "undefined") {
-                window.dispatchEvent(new CustomEvent(APP_EVENTS.vaultItemsChanged));
-            }
+            emitVaultItemsChanged();
         } else {
             void syncStore.refreshPendingCount();
         }
@@ -580,14 +583,7 @@ export async function retryPendingPurgeConflicts(preFetchedItems?: LocalItem[]):
         if (item.sync_error !== "pending_purge_conflict") continue;
         try {
             const { item: conflictCopy, title } = await createConflictCopyForItem(item);
-            await db.put("items", conflictCopy);
-            await enqueueMutation(conflictCopy.id, "upsert");
-            conflictStore.add({
-                id: conflictCopy.id,
-                title,
-                type: item.type,
-                at: Math.floor(Date.now() / 1000),
-            });
+            await announceConflictCopy(db, conflictCopy, title, item.type);
             if (item.type === "file" && item.chunk_set_id) {
                 const stillShared = hasLocalChunkSetRef(allItems, item.chunk_set_id, item.id);
                 // The copy now references the set — the original is deleted, and the set stays for the copy.

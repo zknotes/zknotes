@@ -1,7 +1,9 @@
 <script lang="ts">
 import { LOG_LEVELS, type LogLevel } from "@zknotes/shared";
 import { onMount } from "svelte";
+import { API_BASE } from "$lib/core/api/client";
 import { clearDevServerLogs, getDevLogLevel, setDevLogLevel } from "$lib/core/api/diagnostics";
+import { devWarn } from "$lib/core/utils/dev-log";
 import type { Snippet } from "svelte";
 import type { LogEntry } from "./dev-store.svelte";
 import ThemePicker from "$lib/core/ui/ThemePicker.svelte";
@@ -57,8 +59,8 @@ onMount(() => {
 
 function connectSSE() {
     if (eventSource) eventSource.close();
-    const url = import.meta.env.VITE_API_URL || "http://localhost:3000";
-    eventSource = new EventSource(`${url}/dev-logs-stream`);
+    // Same origin through the Vite proxy, like every other API call (API_BASE is "" in dev).
+    eventSource = new EventSource(`${API_BASE}/dev-logs-stream`);
 
     eventSource.onmessage = (event) => {
         try {
@@ -69,7 +71,9 @@ function connectSSE() {
                     logsContainer.scrollTop = logsContainer.scrollHeight;
                 }
             }, 10);
-        } catch (e) {}
+        } catch (e) {
+            devWarn("DevPanel: unreadable log event", e);
+        }
     };
 
     eventSource.onerror = () => {

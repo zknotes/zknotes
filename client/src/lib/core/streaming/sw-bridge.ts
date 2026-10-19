@@ -5,6 +5,7 @@
  *
  * The message types are shared with service-worker.ts — the protocol changes in one place.
  */
+import { ensureServiceWorkerRegistration } from "$lib/core/services/sw-update";
 import { fileBridge } from "$lib/core/events/file-bridge";
 
 // ── The message types (SW ↔ the main thread) ─────────────────────────────────
@@ -57,9 +58,7 @@ export function initStreamBridge(): void {
     if (streamBridgeInitialized) return;
     streamBridgeInitialized = true;
 
-    navigator.serviceWorker.register("/service-worker.js", { type: "module" }).catch((e) => {
-        console.warn("Service worker registration failed", e);
-    });
+    void ensureServiceWorkerRegistration();
 
     navigator.serviceWorker.addEventListener("message", (event) => {
         if (event.data && event.data.type === "REQUEST_STREAM") {
@@ -78,9 +77,8 @@ export function initStreamBridge(): void {
 export async function ensureStreamServiceWorker(timeoutMs = 8_000): Promise<boolean> {
     if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return false;
     try {
-        const reg = await navigator.serviceWorker.register("/service-worker.js", {
-            type: "module",
-        });
+        const reg = await ensureServiceWorkerRegistration();
+        if (!reg) return false;
         // An active controller is enough for /zknotes/stream/ to be intercepted — do NOT activate a
         // waiting worker. SKIP_WAITING used to be sent unconditionally, so playing a video in the
         // middle of a session activated a background update → controllerchange → a hard reload.
@@ -237,7 +235,14 @@ export async function handleStreamRequest(
             async pull(controller) {
                 try {
                     const i = nextChunk++;
-                    const nonce = fromBase64(chunks[i]?.nonce);
+                    const chunk = chunks[i];
+                    if (!chunk) {
+                        // A Range past the manifest — end the stream with a message, not with
+                        // `atob(undefined)`.
+                        controller.error(new Error(`chunk ${i} out of range`));
+                        return;
+                    }
+                    const nonce = fromBase64(chunk.nonce);
                     // Read-through: the local cache → the network plus persistence (every chunk
                     // watched stays available offline, not only pinned ones — a pin merely protects
                     // against LRU eviction, see chunk-loader.ts::enforceCap).

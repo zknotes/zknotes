@@ -5,11 +5,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("$lib/core/api", () => ({
     pushBatch: vi.fn().mockResolvedValue({ succeeded: [], conflicts: [], errors: [] }),
 }));
-vi.mock("$lib/core/sync", () => ({
-    pushItem: vi.fn().mockResolvedValue(undefined),
-    enqueueMutation: vi.fn().mockResolvedValue(undefined),
-    applyRefusedDeletes: vi.fn().mockResolvedValue(undefined),
-}));
+vi.mock("$lib/core/sync", () => {
+    const pushItem = vi.fn().mockResolvedValue(undefined);
+    return {
+        enqueueMutation: vi.fn().mockResolvedValue(undefined),
+        applyRefusedDeletes: vi.fn().mockResolvedValue(undefined),
+        pushItem,
+        // The service pushes through pushOrQueue; assertions on pushItem keep counting.
+        pushOrQueue: vi.fn((item: unknown) => {
+            void pushItem(item);
+        }),
+    };
+});
 vi.mock("$lib/core/search", () => ({ removeDoc: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("./invalidation", () => ({ invalidateFile: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("./cleanup", () => ({

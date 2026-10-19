@@ -10,6 +10,7 @@
  * same conflict is never added twice.
  */
 
+import { nowSec } from "$lib/core/utils/duration";
 import { decryptItemPayload } from "$lib/core/crypto/item-codec";
 import { getDB } from "$lib/core/db";
 import { normalizeConflictAt } from "$lib/core/utils/conflict-at";
@@ -51,7 +52,7 @@ class ConflictStore {
                         id: item.id,
                         title: (payload.name || payload.title || "Untitled") as string,
                         type: item.type,
-                        at: normalizeConflictAt(item.updated_at ?? Math.floor(Date.now() / 1000)),
+                        at: normalizeConflictAt(item.updated_at ?? nowSec()),
                         conflict_of: item.conflict_of,
                     });
                 } catch {

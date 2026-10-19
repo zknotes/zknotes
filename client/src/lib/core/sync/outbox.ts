@@ -2,7 +2,7 @@
 // enqueueing, the retry backoff and the queue-change listeners. The push drains it; the pull and the
 // conflict helpers only add to it.
 import { getDB, type MutationQueueItem } from "$lib/core/db";
-import { MINUTE_MS, SECOND_MS } from "$lib/core/utils/duration";
+import { MINUTE_MS, nowSec, SECOND_MS } from "$lib/core/utils/duration";
 import { syncStore } from "./store.svelte";
 
 /** The IndexedDB handle the sync modules pass around. */
@@ -106,4 +106,18 @@ export async function migrateLegacyItems(): Promise<void> {
 export async function hasPendingMutations(): Promise<boolean> {
     const db = await getDB();
     return (await db.count("mutation-queue")) > 0;
+}
+
+/**
+ * Marks a local row as changed here: dirty, one more local revision, and `updated_at` now. The one
+ * convention for every local write (`ItemService.markDirtyAndPush` documents it); the saves that
+ * must NOT move `updated_at` (a conflict resolution, a cycle break) set the two flags by hand.
+ */
+export function touchForPush<
+    T extends { dirty?: boolean; localRev?: number; updated_at?: number | null },
+>(item: T, now: number = nowSec()): T {
+    item.dirty = true;
+    item.localRev = (item.localRev || 0) + 1;
+    item.updated_at = now;
+    return item;
 }

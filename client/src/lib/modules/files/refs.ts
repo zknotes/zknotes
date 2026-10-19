@@ -2,31 +2,22 @@
 // Lifted out of encfile-node.ts / editor-images.ts.
 
 import type { Node as PMNode } from "@tiptap/pm/model";
-
-/** The prefix for files not yet uploaded: `local:<pendingUploadId>`. */
-export const LOCAL_PREFIX = "local:";
+import { extractFileRefs, LOCAL_PREFIX } from "$lib/core/utils/file-refs";
+// The pure string helpers for file references live in core/utils/file-refs.ts: the sync layer and
+// the item service need them too, and core must not import modules/ (events/file-bridge.ts). They
+// stay exported from here for the files module's own callers.
+export {
+    extractFileRefs,
+    LOCAL_PREFIX,
+    reattachEmbedsFromOriginal,
+    stripAllFileRefsFromHtml,
+} from "$lib/core/utils/file-refs";
 
 /**
  * Transaction meta for the upload pipeline re-pointing or dropping a `local:` node (the swap to the
  * real id, an Abort): the editor must not read it as the user removing that node.
  */
 export const UPLOAD_REF_META = "uploadRefChange";
-
-const FILE_ID_RE = /data-file-id="([^"]+)"/g;
-
-/**
- * Returns the distinct real fileIds referenced by an HTML string (a note's content, say).
- * `local:`-prefixed ids are pending uploads — not real items yet — and are skipped.
- */
-export function extractFileRefs(content: unknown): string[] {
-    if (typeof content !== "string" || content.length === 0) return [];
-    const ids = new Set<string>();
-    for (const m of content.matchAll(FILE_ID_RE)) {
-        const id = m[1];
-        if (id && !id.startsWith(LOCAL_PREFIX)) ids.add(id);
-    }
-    return [...ids];
-}
 
 /**
  * The same as `extractFileRefs`, but from a ProseMirror doc — with no `getHTML()` serialisation
@@ -46,74 +37,6 @@ export function extractFileRefsFromDoc(doc: PMNode): string[] {
 /** Merges the live editor refs and the saved payload (a union) — it avoids an either-or drift. */
 export function mergeAttachmentFileIds(liveIds: string[], payloadContent: unknown): string[] {
     return [...new Set([...liveIds, ...extractFileRefs(payloadContent)])];
-}
-
-// Source strings (not a shared /g RegExp) — `lastIndex` on a global regex breaks consecutive calls.
-const VOID_FILE_REF_SRC = String.raw`<(img|br|hr)\b[^>]*\bdata-file-id\s*=\s*["']([^"']*)["'][^>]*\/?>`;
-const PAIRED_FILE_REF_SRC = String.raw`\<([a-z][a-z0-9]*)\b[^>]*\bdata-file-id\s*=\s*["']([^"']*)["'][^>]*>[\s\S]*?<\/\1>`;
-
-/**
- * Removes EVERY encFile reference from an HTML string.
- * Used by note duplication and by the conflict copy — a file item cannot be shared between notes,
- * so a note's copy must not keep the `data-file-id` (or All Files and parent_id drift).
- */
-export function stripAllFileRefsFromHtml(html: string): { html: string; strippedCount: number } {
-    if (!html.includes("data-file-id")) return { html, strippedCount: 0 };
-
-    const strippedCount = (html.match(/data-file-id\s*=/gi) ?? []).length;
-    // A regex rather than a DOMParser — the same helper works in the browser and in the Node integration tests.
-    // A new RegExp per loop — it avoids lastIndex on a shared /g object.
-    let out = html;
-    let prev = "";
-    while (out !== prev) {
-        prev = out;
-        out = out
-            .replace(new RegExp(VOID_FILE_REF_SRC, "gi"), "")
-            .replace(new RegExp(PAIRED_FILE_REF_SRC, "gi"), "");
-    }
-
-    // No DOMPurify pass — the input is already vault HTML; we only remove the known encFile tags.
-    return { html: out, strippedCount };
-}
-
-/**
- * A conflict copy drops the embeds (the 1:1 model — a sibling must not share a file).
- * The `keep_local` merge-back writes the offline HTML back into the ORIGINAL (the same id, the owner
- * of the files): the embed markup from the original that is missing from the offline content is
- * therefore restored, so the READY
- * files are not left with no `encFile` reference in the owning note.
- */
-export function reattachEmbedsFromOriginal(offlineHtml: string, originalHtml: string): string {
-    if (typeof offlineHtml !== "string") return offlineHtml;
-    if (typeof originalHtml !== "string" || !originalHtml.includes("data-file-id")) {
-        return offlineHtml;
-    }
-
-    const already = new Set(extractFileRefs(offlineHtml));
-    const snippets: string[] = [];
-
-    const collect = (source: string) => {
-        const re = new RegExp(source, "gi");
-        let m: RegExpExecArray | null = re.exec(originalHtml);
-        while (m) {
-            const fileId = m[2];
-            const tag = m[0];
-            if (fileId && !fileId.startsWith(LOCAL_PREFIX) && !already.has(fileId) && tag) {
-                already.add(fileId);
-                snippets.push(tag);
-            }
-            m = re.exec(originalHtml);
-        }
-    };
-    collect(VOID_FILE_REF_SRC);
-    collect(PAIRED_FILE_REF_SRC);
-
-    if (snippets.length === 0) return offlineHtml;
-
-    const appendix = snippets
-        .map((tag) => (tag.trimStart().startsWith("<p") ? tag : `<p>${tag}</p>`))
-        .join("");
-    return offlineHtml + appendix;
 }
 
 /**

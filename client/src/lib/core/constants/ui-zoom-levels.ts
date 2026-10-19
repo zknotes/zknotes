@@ -1,12 +1,6 @@
-import type { UiZoomLevel } from "$lib/core/stores/ui-zoom.svelte";
-
-export interface UiZoomLevelPreset {
-    id: UiZoomLevel;
-    label: string;
-}
-
-// One place of truth for the list of UI zoom levels — UiZoomPicker and SidebarAppMenu both use it.
-export const UI_ZOOM_LEVELS: UiZoomLevelPreset[] = [
+// One place of truth for the UI zoom levels — the store, UiZoomPicker and SidebarAppMenu all derive
+// from this list (it used to be written three times: a type union, an id array and this table).
+export const UI_ZOOM_LEVELS = [
     { id: "auto", label: "Auto" },
     { id: "80", label: "80%" },
     { id: "100", label: "100%" },
@@ -17,4 +11,11 @@ export const UI_ZOOM_LEVELS: UiZoomLevelPreset[] = [
     { id: "200", label: "200%" },
     { id: "220", label: "220%" },
     { id: "240", label: "240%" },
-];
+] as const;
+
+export type UiZoomLevel = (typeof UI_ZOOM_LEVELS)[number]["id"];
+export interface UiZoomLevelPreset {
+    id: UiZoomLevel;
+    label: string;
+}
+export const UI_ZOOM_LEVEL_IDS: readonly UiZoomLevel[] = UI_ZOOM_LEVELS.map((l) => l.id);

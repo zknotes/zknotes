@@ -1,7 +1,7 @@
 import { viewProofB64FromFragmentKey } from "@zknotes/shared";
 import { uuidv7 } from "uuidv7";
 import { createShare, listShares, revokeShare, type ShareListEntry } from "$lib/core/api/shares";
-import { bytesToB64 } from "$lib/core/utils/b64url";
+import { toBase64 } from "$lib/core/utils/base64";
 import { wrapItemKeyForShareTask } from "$lib/core/workers/crypto-rpc";
 
 export type ShareLinkType = "standard" | "expiry" | "burn";
@@ -76,8 +76,8 @@ export async function createShareLink(opts: {
             });
             attachments.push({
                 file_id: fileId,
-                wrapped_item_key: bytesToB64(fileWrap.wrappedItemKey),
-                item_key_nonce: bytesToB64(fileWrap.itemKeyNonce),
+                wrapped_item_key: toBase64(fileWrap.wrappedItemKey),
+                item_key_nonce: toBase64(fileWrap.itemKeyNonce),
             });
         }
     }
@@ -93,8 +93,8 @@ export async function createShareLink(opts: {
     await createShare({
         id: shareId,
         source_item_id: opts.sourceItemId,
-        wrapped_item_key: bytesToB64(wrapped.wrappedItemKey),
-        item_key_nonce: bytesToB64(wrapped.itemKeyNonce),
+        wrapped_item_key: toBase64(wrapped.wrappedItemKey),
+        item_key_nonce: toBase64(wrapped.itemKeyNonce),
         expires_in_sec: expiresInSec,
         max_views: maxViews,
         // Proof of possession of the #k= fragment key — the server burns only on a valid proof.

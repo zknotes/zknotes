@@ -23,6 +23,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ### Fixed
 
+- Settings that live only in this browser (date and time format, the outline panel, pinned
+  folders) no longer fail with an error when the browser blocks local storage (a private window,
+  a locked-down profile): the setting still applies for the session, it is simply not remembered.
+- A shared file whose chunk request fails on the server now shows the share as unavailable instead
+  of breaking the media stream with an unreadable error.
 - Storage: when an edit re-attaches a file to a blob that was about to be deleted (a conflict copy
   of a purged file, say), the blob's bytes now count against the quota again at once, as they
   already did when such a file was created; before, the files counter under-reported until the

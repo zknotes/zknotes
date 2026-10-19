@@ -1,8 +1,8 @@
 // The domain client for the /auth/* endpoints — the only place that knows the URLs and the
 // request/response shapes. The crypto logic (the derivation, the zeroize) stays in services/auth.ts;
 // these are thin HTTP calls alone.
+import { PROBE_TIMEOUT_MS } from "$lib/core/constants/reachability";
 import type { ChangePasswordRequest, KdfParams, VaultCreateInput } from "@zknotes/shared";
-import { SECOND_MS } from "$lib/core/utils/duration";
 import { apiFetch } from "./client";
 
 /** The KDF metadata from the server — both /auth/kdf-params and /auth/me return it. */
@@ -23,7 +23,7 @@ export interface KdfMetadataWithVaultKey extends KdfMetadata {
 // happens later, on the device). A stalled server — paused, or wedged on its database — accepts
 // the connection and never replies; the general 30 s timeout left "Unlock vault" spinning that long
 // before saying anything.
-const KDF_PARAMS_TIMEOUT_MS = 10 * SECOND_MS;
+const KDF_PARAMS_TIMEOUT_MS = PROBE_TIMEOUT_MS;
 
 /** POST /auth/kdf-params — the salt+params for the login derivation (fake ones for unknown emails). */
 export async function getKdfParams(email: string): Promise<KdfMetadata> {

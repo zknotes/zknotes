@@ -98,7 +98,10 @@ export async function getShareChunk(
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
     });
-    const data = (await res.json()) as { url?: string; status?: string };
+    // A 5xx, an HTML error page or an empty answer is "unavailable", not a SyntaxError in the
+    // media stream's pull().
+    if (!res.ok) return { status: "unavailable" };
+    const data = (await res.json().catch(() => ({}))) as { url?: string; status?: string };
     if (data.status === "unavailable" || !data.url) {
         return { status: "unavailable" };
     }

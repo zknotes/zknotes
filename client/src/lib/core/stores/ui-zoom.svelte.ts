@@ -5,30 +5,11 @@ import {
     savePersisted,
 } from "$lib/core/utils/persisted";
 
-export type UiZoomLevel =
-    | "auto"
-    | "80"
-    | "100"
-    | "120"
-    | "140"
-    | "160"
-    | "180"
-    | "200"
-    | "220"
-    | "240";
+import { UI_ZOOM_LEVEL_IDS, type UiZoomLevel } from "$lib/core/constants/ui-zoom-levels";
 
-const ZOOM_LEVELS: UiZoomLevel[] = [
-    "auto",
-    "80",
-    "100",
-    "120",
-    "140",
-    "160",
-    "180",
-    "200",
-    "220",
-    "240",
-];
+export type { UiZoomLevel };
+
+const ZOOM_LEVELS: readonly UiZoomLevel[] = UI_ZOOM_LEVEL_IDS;
 
 class UiZoomStore {
     private level = $state<UiZoomLevel>("auto");

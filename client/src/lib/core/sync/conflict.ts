@@ -1,7 +1,8 @@
 // The conflict-copy helpers — used by the push (409) and the pull (a concurrent change).
 // Lifted out of sync/index.ts; the crypto goes through crypto/item-codec.
+import { nowSec } from "$lib/core/utils/duration";
 import { uuidv7 } from "uuidv7";
-import { APP_EVENTS } from "$lib/core/constants/events";
+import { APP_EVENTS, emitVaultItemsChanged } from "$lib/core/constants/events";
 import { decryptItemPayload, encryptItemPayloadToBase64 } from "$lib/core/crypto/item-codec";
 import { getDB, type LocalItem } from "$lib/core/db";
 import { addOrUpdateDoc, removeDoc } from "$lib/core/search";
@@ -13,8 +14,8 @@ import {
     cloneItemKeyTask,
     generateItemKeyTask,
 } from "$lib/core/workers/crypto-rpc";
-import { reattachEmbedsFromOriginal, stripAllFileRefsFromHtml } from "$lib/modules/files/refs";
-import { enqueueMutation } from "./outbox";
+import { reattachEmbedsFromOriginal, stripAllFileRefsFromHtml } from "$lib/core/utils/file-refs";
+import { type DB, enqueueMutation, touchForPush } from "./outbox";
 
 /**
  * A conflict copy must not inherit the parent_id of a purged or vanished parent — the push would
@@ -30,10 +31,47 @@ export async function resolveConflictParentId(
     return preferredParentId;
 }
 
+/**
+ * Puts a freshly made conflict copy into play: the row, its mutation, and the inbox entry. The pull
+ * (two purge branches), the retry of a failed purge copy and the concurrent-edit fallback all did
+ * these three steps by hand.
+ */
+export async function announceConflictCopy(
+    db: DB,
+    copy: LocalItem,
+    title: string,
+    type: LocalItem["type"],
+): Promise<void> {
+    await db.put("items", copy);
+    await enqueueMutation(copy.id, "upsert");
+    conflictStore.add({ id: copy.id, title, type, at: nowSec() });
+}
+
+/**
+ * A dirty local row whose id the server has purged: keep the unpushed text as a conflict copy BEFORE
+ * the original goes. Fail closed — when the copy cannot be made the original stays, marked
+ * `pending_purge_conflict` for the next sync to retry, and the caller must not delete it.
+ * Returns whether the original may now be removed.
+ */
+export async function preserveDirtyRowAsConflictCopy(db: DB, local: LocalItem): Promise<boolean> {
+    try {
+        const { item: copy, title } = await createConflictCopyForItem(local);
+        await announceConflictCopy(db, copy, title, local.type);
+        return true;
+    } catch (e) {
+        console.error("Failed to create conflict copy for purged item", local.id, e);
+        if (!local.sync_error) {
+            local.sync_error = "pending_purge_conflict";
+            await db.put("items", local);
+        }
+        return false;
+    }
+}
+
 /** UI: refetch the tree and force a reload of the open note, even in a dirty editor. */
 function notifyConflictResolved(originalId: string | undefined, conflictId: string): void {
     if (typeof window === "undefined") return;
-    window.dispatchEvent(new CustomEvent(APP_EVENTS.vaultItemsChanged));
+    emitVaultItemsChanged();
     if (originalId) {
         window.dispatchEvent(
             new CustomEvent(APP_EVENTS.noteForceReload, { detail: { noteId: originalId } }),
@@ -88,8 +126,8 @@ export async function createLocalConflictCopyFromPayload(
         version: 1,
         dirty: true,
         conflict_of: originalItem.id,
-        created_at: Math.floor(Date.now() / 1000),
-        updated_at: Math.floor(Date.now() / 1000),
+        created_at: nowSec(),
+        updated_at: nowSec(),
     };
 
     const doc = toSearchDoc({ id: newId, type: originalItem.type }, payload);
@@ -171,9 +209,7 @@ export async function replaceConflictCopyContent(
     }
     fresh.encrypted_payload = encrypted_payload;
     fresh.payload_nonce = payload_nonce;
-    fresh.dirty = true;
-    fresh.localRev = (fresh.localRev || 0) + 1;
-    fresh.updated_at = Math.floor(Date.now() / 1000);
+    touchForPush(fresh);
     await store.put(fresh);
     await tx.done;
 
@@ -235,8 +271,8 @@ export async function createLocalFileConflictCopy(
         version: 1,
         dirty: true,
         conflict_of: localItem.id,
-        created_at: Math.floor(Date.now() / 1000),
-        updated_at: Math.floor(Date.now() / 1000),
+        created_at: nowSec(),
+        updated_at: nowSec(),
     };
 
     void addOrUpdateDoc(toSearchDoc({ id: newId, type: "file" }, payload)).catch((e) =>

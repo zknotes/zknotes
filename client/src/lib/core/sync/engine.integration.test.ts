@@ -31,11 +31,50 @@ vi.mock("$lib/core/search", () => ({
     suspendIndexPersistence: vi.fn(),
     resumeIndexPersistenceAndFlush: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("./conflict", () => ({
-    createLocalConflictCopy: vi.fn(),
-    createConflictCopyForItem: vi.fn(),
-    isConflictIdentical: vi.fn().mockResolvedValue(false),
-}));
+vi.mock("./conflict", async () => {
+    // The copy makers are mocked per test; the two helpers the pull and the retry go through are
+    // rebuilt on top of the mocks so the fail-closed sequence stays observable here.
+    const { enqueueMutation } = await import("./outbox");
+    const { conflictStore } = await import("$lib/core/stores/conflict-store.svelte");
+    const createConflictCopyForItem = vi.fn();
+    const announceConflictCopy = vi.fn(
+        async (
+            db: { put: (store: "items", value: unknown) => Promise<unknown> },
+            copy: { id: string },
+            title: string,
+            type: string,
+        ) => {
+            await db.put("items", copy);
+            await enqueueMutation(copy.id, "upsert");
+            conflictStore.add({ id: copy.id, title, type: type as "note", at: 0 });
+        },
+    );
+    const preserveDirtyRowAsConflictCopy = vi.fn(
+        async (
+            db: { put: (store: "items", value: unknown) => Promise<unknown> },
+            local: { id: string; type: string; sync_error?: string },
+        ) => {
+            try {
+                const { item, title } = await createConflictCopyForItem(local);
+                await announceConflictCopy(db, item, title, local.type);
+                return true;
+            } catch {
+                if (!local.sync_error) {
+                    local.sync_error = "pending_purge_conflict";
+                    await db.put("items", local);
+                }
+                return false;
+            }
+        },
+    );
+    return {
+        createLocalConflictCopy: vi.fn(),
+        createConflictCopyForItem,
+        isConflictIdentical: vi.fn().mockResolvedValue(false),
+        announceConflictCopy,
+        preserveDirtyRowAsConflictCopy,
+    };
+});
 vi.mock("./store.svelte", () => ({
     syncStore: {
         markSyncSuccess: vi.fn(),

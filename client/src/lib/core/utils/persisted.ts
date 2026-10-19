@@ -41,6 +41,15 @@ export const STORAGE_KEYS = {
      * a layout preference like the ui zoom.
      */
     sidebarWidth: "cn_sidebar_width",
+    /** Raw strings — the per-device date/time preferences (never synced). */
+    dateTimeTimeFormat: "zknotes:datetime-time-format",
+    dateTimeDateFormat: "zknotes:datetime-date-format",
+    dateTimeCustomPattern: "zknotes:datetime-custom-pattern",
+    dateTimeTimezone: "zknotes:datetime-timezone",
+    /** "1" | "0" — whether the outline panel is open (sticky, like Word's navigation pane). */
+    outlineVisible: "zknotes:outline-visible",
+    /** A raw number string — the outline panel's width in px. */
+    outlineWidth: "zknotes:outline-width",
 } as const;
 
 interface Serde<T> {
@@ -74,3 +83,13 @@ export const rawStringSerde: Serde<string> = {
     serialize: (v) => v,
     deserialize: (raw) => raw,
 };
+
+/** Removes a key; SSR-safe and best-effort like the other two. */
+export function removePersisted(key: string): void {
+    if (typeof localStorage === "undefined") return;
+    try {
+        localStorage.removeItem(key);
+    } catch {
+        // best-effort
+    }
+}

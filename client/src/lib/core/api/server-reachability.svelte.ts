@@ -1,9 +1,10 @@
+import { RETRY_DELAYS_S } from "$lib/core/constants/reachability";
 import { SECOND_MS } from "$lib/core/utils/duration";
 
 export type ReachabilityStatus = "checking" | "reachable" | "unreachable";
 
 /** The wait before each automatic retry while the server is away; the last one repeats. */
-export const RETRY_DELAYS_MS: readonly number[] = [2, 4, 8, 15].map((s) => s * SECOND_MS);
+export const RETRY_DELAYS_MS: readonly number[] = RETRY_DELAYS_S.map((s) => s * SECOND_MS);
 
 export type ServerReachabilityOptions = {
     /** Called once each time the server answers again after having been unreachable. */

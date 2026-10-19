@@ -2,9 +2,10 @@
 // into IndexedDB (a dirty local row is left for its push to reconcile; a purged one with unsynced
 // changes becomes a conflict copy first), and a user switch or a restore replaces the local vault by
 // mark-and-sweep once the whole pull has landed.
+import type { LocalItem } from "$lib/core/db";
 import { type AnyItemPayload, createsCycle, ITEM_LIMITS, SYNC_LIMITS } from "@zknotes/shared";
 import { ApiError, type PullDelta, pullPage } from "$lib/core/api";
-import { APP_EVENTS } from "$lib/core/constants/events";
+import { emitVaultItemsChanged } from "$lib/core/constants/events";
 import { decryptManyItemPayloads } from "$lib/core/crypto/item-codec";
 import { getDB, getWatermark, setWatermark } from "$lib/core/db";
 import { fileBridge } from "$lib/core/events/file-bridge";
@@ -17,11 +18,11 @@ import {
 } from "$lib/core/search";
 import { toSearchDoc } from "$lib/core/search/doc";
 import { conflictStore } from "$lib/core/stores/conflict-store.svelte";
-import { SECOND_MS } from "$lib/core/utils/duration";
+import { nowSec, SECOND_MS } from "$lib/core/utils/duration";
 import { clearRestoreUiKeys } from "$lib/core/utils/clear-vault-ui-keys";
 import { loadPersisted, rawStringSerde, STORAGE_KEYS } from "$lib/core/utils/persisted";
 import type { SearchDoc } from "$lib/core/workers/crypto-rpc";
-import { createConflictCopyForItem } from "./conflict";
+import { preserveDirtyRowAsConflictCopy } from "./conflict";
 import { enqueueMutation } from "./outbox";
 import { syncStore } from "./store.svelte";
 import { isSyncLockHeld, withSyncLock } from "./sync-lock";
@@ -52,6 +53,23 @@ async function fetchPullPage(opts: { since: number; cursor?: string | null }): P
             await new Promise((r) => setTimeout(r, wait));
             delay = Math.min(delay * 2, 30 * SECOND_MS);
         }
+    }
+}
+
+/**
+ * A file item the server has purged: drop its decrypted bytes and, unless a conflict copy still
+ * shares the chunk set, evict the chunks. Three branches of the pull used to repeat this.
+ */
+function forgetPurgedFile(
+    local: LocalItem,
+    snapshot: readonly LocalItem[],
+    purgedFileIds: Set<string>,
+): void {
+    purgedFileIds.add(local.id);
+    void fileBridge.invalidateFile(local.id).catch(() => {});
+    if (!local.chunk_set_id) return;
+    if (!hasLocalChunkSetRef(snapshot, local.chunk_set_id, local.id)) {
+        void evictChunkSet(local.chunk_set_id).catch(() => {});
     }
 }
 
@@ -137,51 +155,16 @@ export async function pullAndMerge(opts?: {
                 // stale `dirty` is still on it — a copy of it would resurrect a permanently deleted
                 // item as a live "[Conflict …]" note.
                 if (local.dirty && local.purged_at == null) {
-                    try {
-                        const { item: conflictCopy, title } =
-                            await createConflictCopyForItem(local);
-                        await db.put("items", conflictCopy);
-                        await enqueueMutation(conflictCopy.id, "upsert");
-                        conflictStore.add({
-                            id: conflictCopy.id,
-                            title,
-                            type: local.type,
-                            at: Math.floor(Date.now() / 1000),
-                        });
-                    } catch (e) {
-                        console.error(
-                            "Failed to create conflict copy for purged item",
-                            local.id,
-                            e,
-                        );
-                        // Keep the dirty original and its mutation; the next sync retries the copy.
-                        // Why the watermark is not held back: setWatermark runs at the end of the whole
-                        // pull — reprocessing the deleted log may repeat, and the copy retry depends on
-                        // the original staying put.
-                        if (!local.sync_error) {
-                            local.sync_error = "pending_purge_conflict";
-                            await db.put("items", local);
-                        }
-                        continue;
-                    }
+                    // Why the watermark is not held back on failure: setWatermark runs at the end of
+                    // the whole pull — reprocessing the deleted log may repeat, and the copy retry
+                    // depends on the original staying put.
+                    if (!(await preserveDirtyRowAsConflictCopy(db, local))) continue;
                 }
 
                 await db.delete("items", entry.id);
                 void removeDoc(entry.id).catch(() => {});
-                if (local.type === "file") {
-                    purgedFileIds.add(entry.id);
-                    void fileBridge.invalidateFile(entry.id).catch(() => {});
-                    // Do not evict the chunk set while a conflict copy still references it
-                    // (shared).
-                    if (local.chunk_set_id) {
-                        const stillShared = hasLocalChunkSetRef(
-                            localItemsSnapshot,
-                            local.chunk_set_id,
-                            entry.id,
-                        );
-                        if (!stillShared) void evictChunkSet(local.chunk_set_id).catch(() => {});
-                    }
-                }
+                if (local.type === "file")
+                    forgetPurgedFile(local, localItemsSnapshot, purgedFileIds);
             }
 
             // Decrypt every non-tombstoned, non-trashed item in this page in ONE worker round trip
@@ -226,42 +209,10 @@ export async function pullAndMerge(opts?: {
                     // copy succeeds.
                     // Same rule as the deletedEntries branch: a local tombstone is never copied.
                     if (local?.dirty && local.purged_at == null) {
-                        try {
-                            const { item: conflictCopy, title } =
-                                await createConflictCopyForItem(local);
-                            await db.put("items", conflictCopy);
-                            await enqueueMutation(conflictCopy.id, "upsert");
-                            conflictStore.add({
-                                id: conflictCopy.id,
-                                title,
-                                type: local.type,
-                                at: Math.floor(Date.now() / 1000),
-                            });
-                        } catch (e) {
-                            console.error(
-                                "Failed to create conflict copy for tombstone",
-                                local.id,
-                                e,
-                            );
-                            if (!local.sync_error) {
-                                local.sync_error = "pending_purge_conflict";
-                                await db.put("items", local);
-                            }
-                            continue;
-                        }
+                        if (!(await preserveDirtyRowAsConflictCopy(db, local))) continue;
                     }
                     if (local?.type === "file") {
-                        purgedFileIds.add(serverItem.id);
-                        void fileBridge.invalidateFile(serverItem.id).catch(() => {});
-                        if (local.chunk_set_id) {
-                            const stillShared = hasLocalChunkSetRef(
-                                localItemsSnapshot,
-                                local.chunk_set_id,
-                                serverItem.id,
-                            );
-                            if (!stillShared)
-                                void evictChunkSet(local.chunk_set_id).catch(() => {});
-                        }
+                        forgetPurgedFile(local, localItemsSnapshot, purgedFileIds);
                     }
                     await db.delete("items", serverItem.id);
                     void removeDoc(serverItem.id).catch(() => {});
@@ -360,7 +311,7 @@ export async function pullAndMerge(opts?: {
                             id: serverItem.id,
                             title: ((payload?.name || payload?.title) ?? "Untitled") as string,
                             type: serverItem.type,
-                            at: Math.floor(Date.now() / 1000),
+                            at: nowSec(),
                         });
                     }
                 }
@@ -398,15 +349,8 @@ export async function pullAndMerge(opts?: {
         for (const local of locals) {
             if (seenIds.has(local.id)) continue;
             if (prePullIds && !prePullIds.has(local.id)) continue;
-            if (local.type === "file") {
-                purgedFileIds.add(local.id);
-                void fileBridge.invalidateFile(local.id).catch(() => {});
-                if (local.chunk_set_id) {
-                    // `locals` is already a fresh, current snapshot — reuse it directly.
-                    const stillShared = hasLocalChunkSetRef(locals, local.chunk_set_id, local.id);
-                    if (!stillShared) void evictChunkSet(local.chunk_set_id).catch(() => {});
-                }
-            }
+            // `locals` is already a fresh, current snapshot — reuse it directly.
+            if (local.type === "file") forgetPurgedFile(local, locals, purgedFileIds);
             await db.delete("items", local.id);
             await db.delete("mutation-queue", local.id);
             void removeDoc(local.id).catch(() => {});
@@ -450,7 +394,7 @@ export async function pullAndMerge(opts?: {
 
     // The first pull on a new device, or phase 5 — tell the UI to drop "Vault is waiting".
     if ((isPendingClear || replaceLocal) && typeof window !== "undefined") {
-        window.dispatchEvent(new CustomEvent(APP_EVENTS.vaultItemsChanged));
+        emitVaultItemsChanged();
     }
 
     await resumeIndexPersistenceAndFlush();

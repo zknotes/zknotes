@@ -9,3 +9,8 @@
 
 export const SECOND_MS = 1_000;
 export const MINUTE_MS = 60 * SECOND_MS;
+
+/** The current time in whole seconds — the unit every `updated_at`/`created_at` in the vault uses. */
+export function nowSec(): number {
+    return Math.floor(Date.now() / 1000);
+}

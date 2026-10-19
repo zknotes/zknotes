@@ -13,10 +13,12 @@
  * nonce minted per response.
  */
 
-/** Seconds before each automatic retry; the last one repeats. */
-export const RETRY_DELAYS_S: readonly number[] = [2, 4, 8, 15];
+import { PROBE_TIMEOUT_MS, RETRY_DELAYS_S } from "$lib/core/constants/reachability";
+import { toBase64 } from "$lib/core/utils/base64";
 
-const CHECK_TIMEOUT_MS = 10_000;
+export { RETRY_DELAYS_S };
+
+const CHECK_TIMEOUT_MS = PROBE_TIMEOUT_MS;
 
 export function serverUnreachableCsp(nonce: string): string {
     return [
@@ -151,8 +153,7 @@ export function renderServerUnreachablePage(nonce: string): string {
 }
 
 function mintNonce(): string {
-    const bytes = crypto.getRandomValues(new Uint8Array(16));
-    return btoa(String.fromCharCode(...bytes));
+    return toBase64(crypto.getRandomValues(new Uint8Array(16)));
 }
 
 export function serverUnreachableResponse(): Response {

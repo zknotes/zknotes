@@ -1,9 +1,10 @@
 // The push result — a shared handler for the foreground push and the background queue: what happens
 // locally once the server has answered an /items/batch push (accepted, a version conflict that
 // becomes a conflict copy, or a per-item rejection), plus the handling of a refused purge.
+import { nowSec } from "$lib/core/utils/duration";
 import type { AnyItemPayload, NotePayload } from "@zknotes/shared";
 import type { PushBatchResult } from "$lib/core/api";
-import { APP_EVENTS } from "$lib/core/constants/events";
+import { APP_EVENTS, emitVaultItemsChanged } from "$lib/core/constants/events";
 import { decryptItemPayload } from "$lib/core/crypto/item-codec";
 import { getDB, type LocalItem } from "$lib/core/db";
 import { addOrUpdateDoc, removeDoc } from "$lib/core/search";
@@ -186,7 +187,7 @@ async function applyConflict(db: DB, c: ConflictEntry): Promise<ApplyConflictRes
                 id: conflictCopy.id,
                 title: conflictTitle,
                 type: conflictCopy.type,
-                at: Math.floor(Date.now() / 1000),
+                at: nowSec(),
             });
             await enqueueMutation(conflictCopy.id, "upsert");
         }
@@ -381,9 +382,7 @@ export async function applyDeleteRejected(db: DB, c: ConflictEntry): Promise<voi
     await db.put("items", serverItem);
     await db.delete("mutation-queue", c.id);
     void indexItemFromServer(serverItem);
-    if (typeof window !== "undefined") {
-        window.dispatchEvent(new CustomEvent(APP_EVENTS.vaultItemsChanged));
-    }
+    emitVaultItemsChanged();
 }
 
 /**

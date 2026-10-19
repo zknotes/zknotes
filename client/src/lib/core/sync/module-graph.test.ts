@@ -137,4 +137,26 @@ describe("the sync module graph", () => {
             .map(([name]) => name);
         expect(offenders).toEqual([]);
     });
+
+    it("never statically imports $lib/modules from core/sync or core/services", () => {
+        // The golden rule of imports (events/file-bridge.ts): core must not reach into modules/.
+        // A dynamic `await import("$lib/modules/…")` behind a bridge is the sanctioned exception,
+        // and `STATIC_FROM` ignores it. This used to check only modules/export, so two static imports
+        // of modules/files/refs sat in conflict.ts and item-service.ts unnoticed.
+        const offenders: string[] = [];
+        for (const dir of [DIR, join(DIR, "..", "services")]) {
+            for (const file of readdirSync(dir)) {
+                if (!file.endsWith(".ts") || file.endsWith(".test.ts") || file.endsWith(".d.ts")) {
+                    continue;
+                }
+                const source = readFileSync(join(dir, file), "utf8");
+                for (const m of source.matchAll(STATIC_FROM)) {
+                    if (!m[1] && (m[2] ?? "").startsWith("$lib/modules/")) {
+                        offenders.push(`${file} → ${m[2]}`);
+                    }
+                }
+            }
+        }
+        expect(offenders).toEqual([]);
+    });
 });

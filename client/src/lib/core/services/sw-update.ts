@@ -3,6 +3,33 @@ import { globalToasts } from "$lib/core/stores/toast.svelte";
 /** Once per page load — the (app) layout can remount (login ↔ vault). */
 let initialized = false;
 
+let registration: Promise<ServiceWorkerRegistration | null> | null = null;
+
+/**
+ * The one registration of `/service-worker.js`. The update toast and the stream bridge both need
+ * the worker; each used to call `register()` itself with its own guard and its own warning. The
+ * promise is memoised, so a failure is reported once and later callers get `null`.
+ */
+export function ensureServiceWorkerRegistration(): Promise<ServiceWorkerRegistration | null> {
+    if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) {
+        return Promise.resolve(null);
+    }
+    if (!registration) {
+        registration = navigator.serviceWorker
+            .register("/service-worker.js", { type: "module" })
+            .catch((e) => {
+                console.warn("Service worker registration failed", e);
+                return null;
+            });
+    }
+    return registration;
+}
+
+/** Test seam: the registration is memoised for the page's life, and a test stubs `register` per case. */
+export function __resetServiceWorkerRegistrationForTest(): void {
+    registration = null;
+}
+
 /** The active update toast (durationMs: 0) — do not show a second one for the same or a newer waiting SW. */
 let updateToastId: string | null = null;
 
@@ -65,19 +92,15 @@ export function initServiceWorkerUpdate() {
         });
     }
 
-    navigator.serviceWorker
-        .register("/service-worker.js", { type: "module" })
-        .then((registration) => {
-            // Already waiting for activation (a previous visit, or a background update).
-            watchWorker(registration.waiting);
-            // An install is in progress — updatefound may have passed before our listener.
-            watchWorker(registration.installing);
+    void ensureServiceWorkerRegistration().then((reg) => {
+        if (!reg) return;
+        // Already waiting for activation (a previous visit, or a background update).
+        watchWorker(reg.waiting);
+        // An install is in progress — updatefound may have passed before our listener.
+        watchWorker(reg.installing);
 
-            registration.addEventListener("updatefound", () => {
-                watchWorker(registration.installing);
-            });
-        })
-        .catch((e) => {
-            console.warn("Service worker registration failed", e);
+        reg.addEventListener("updatefound", () => {
+            watchWorker(reg.installing);
         });
+    });
 }

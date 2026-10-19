@@ -1,7 +1,7 @@
 import { createsCycle, type FolderPayload, type NotePayload } from "@zknotes/shared";
 import type { IDBPObjectStore, IDBPTransaction } from "idb";
 import { uuidv7 } from "uuidv7";
-import { APP_EVENTS } from "$lib/core/constants/events";
+import { APP_EVENTS, emitVaultItemsChanged } from "$lib/core/constants/events";
 import { decryptItemPayload, encryptItemPayloadToBase64 } from "$lib/core/crypto/item-codec";
 import { isVaultSessionCurrent } from "$lib/core/crypto/session-key";
 import { getDB, type LocalItem, type ZKnotesDBSchema } from "$lib/core/db";
@@ -11,16 +11,20 @@ import { addOrUpdateDoc, removeDoc } from "$lib/core/search";
 import { toSearchDoc } from "$lib/core/search/doc";
 import { conflictStore } from "$lib/core/stores/conflict-store.svelte";
 import { globalToasts } from "$lib/core/stores/toast.svelte";
-import { enqueueMutation, pushDeletes, pushItem } from "$lib/core/sync";
+import { enqueueMutation, pushDeletes, pushOrQueue } from "$lib/core/sync";
+import { touchForPush } from "$lib/core/sync/outbox";
 import {
+    announceConflictCopy,
     createLocalConflictCopyFromPayload,
     replaceConflictCopyContent,
 } from "$lib/core/sync/conflict";
 import { toBase64 } from "$lib/core/utils/base64";
+import { nowSec } from "$lib/core/utils/duration";
+import { escapeHtml } from "$lib/core/utils/dompurify";
 import { FileLifecycle } from "$lib/core/utils/file-lifecycle";
 import { collectDescendants } from "$lib/core/utils/tree";
 import { encryptPayloadWithNewKeyTask, type SearchDoc } from "$lib/core/workers/crypto-rpc";
-import { stripAllFileRefsFromHtml } from "$lib/modules/files/refs";
+import { stripAllFileRefsFromHtml } from "$lib/core/utils/file-refs";
 
 /**
  * Serialises concurrent reencryptAndSave calls for the same item id, in call order rather than in
@@ -115,9 +119,7 @@ async function saveAsConcurrentConflictCopy(
             ourPayload.content,
         );
         if (written !== "unavailable") {
-            if (typeof window !== "undefined") {
-                window.dispatchEvent(new CustomEvent(APP_EVENTS.vaultItemsChanged));
-            }
+            emitVaultItemsChanged();
             return;
         }
     }
@@ -125,15 +127,7 @@ async function saveAsConcurrentConflictCopy(
         baseItem,
         ourPayload,
     );
-    const db = await getDB();
-    await db.put("items", conflictCopy);
-    await enqueueMutation(conflictCopy.id, "upsert");
-    conflictStore.add({
-        id: conflictCopy.id,
-        title,
-        type: conflictCopy.type,
-        at: Math.floor(Date.now() / 1000),
-    });
+    await announceConflictCopy(await getDB(), conflictCopy, title, conflictCopy.type);
     globalToasts.add({
         variant: "info",
         message:
@@ -145,7 +139,7 @@ async function saveAsConcurrentConflictCopy(
                 detail: { noteId: baseItem.id },
             }),
         );
-        window.dispatchEvent(new CustomEvent(APP_EVENTS.vaultItemsChanged));
+        emitVaultItemsChanged();
     }
 }
 
@@ -303,9 +297,7 @@ export class ItemService {
 
             fresh.encrypted_payload = encrypted_payload;
             fresh.payload_nonce = payload_nonce;
-            fresh.dirty = true;
-            fresh.localRev = (fresh.localRev || 0) + 1;
-            fresh.updated_at = Math.floor(Date.now() / 1000);
+            touchForPush(fresh);
 
             await store.put(fresh);
             await tx.done;
@@ -334,7 +326,7 @@ export class ItemService {
             }
 
             // A fire-and-forget push (nothing waits on it)
-            pushItem(fresh).catch(() => enqueueMutation(id, "upsert"));
+            pushOrQueue(fresh);
             return fresh;
         });
     }
@@ -344,12 +336,10 @@ export class ItemService {
         store: IDBPObjectStore<ZKnotesDBSchema, ["items"], "items", "readwrite">,
         tx: IDBPTransaction<ZKnotesDBSchema, ["items"], "readwrite">,
     ) {
-        item.dirty = true;
-        item.localRev = (item.localRev || 0) + 1;
-        item.updated_at = Math.floor(Date.now() / 1000);
+        touchForPush(item);
         await store.put(item);
         await tx.done;
-        pushItem(item).catch(() => enqueueMutation(item.id, "upsert"));
+        pushOrQueue(item);
     }
 
     /**
@@ -360,12 +350,10 @@ export class ItemService {
      * convention.
      */
     static async markDirtyAndPush(item: LocalItem): Promise<void> {
-        item.dirty = true;
-        item.localRev = (item.localRev || 0) + 1;
-        item.updated_at = Math.floor(Date.now() / 1000);
+        touchForPush(item);
         const db = await getDB();
         await db.put("items", item);
-        pushItem(item).catch(() => enqueueMutation(item.id, "upsert"));
+        pushOrQueue(item);
     }
 
     static async createItem(
@@ -411,8 +399,8 @@ export class ItemService {
             dirty: true,
             localRev: 0,
             // Local placeholder timestamps; the server overwrites them on the first sync.
-            created_at: Math.floor(Date.now() / 1000),
-            updated_at: Math.floor(Date.now() / 1000),
+            created_at: nowSec(),
+            updated_at: nowSec(),
         };
 
         // 4. Save into IndexedDB
@@ -425,7 +413,7 @@ export class ItemService {
         );
 
         // 6. Fire-and-forget push to the server
-        pushItem(item).catch(() => enqueueMutation(item.id, "upsert"));
+        pushOrQueue(item);
 
         return item;
     }
@@ -552,8 +540,7 @@ export class ItemService {
         // TipTap expects an img tag carrying data-file-id for its encFile node.
         // Escape the attribute — a File.name may contain a " and break the HTML, or inject
         // attributes of its own.
-        const esc = (s: string) =>
-            s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+        const esc = escapeHtml;
         const mimeAttr = mime ? ` data-mime="${esc(mime)}"` : "";
         const dimAttrs =
             dims?.width && dims?.height
@@ -593,7 +580,7 @@ export class ItemService {
         const allItems = await db.getAll("items");
         const idsToDelete = collectDescendants(allItems, [id]);
 
-        const now = Math.floor(Date.now() / 1000);
+        const now = nowSec();
         const batchId = uuidv7();
         const trashed: LocalItem[] = [];
         const tx = db.transaction("items", "readwrite");
@@ -612,9 +599,7 @@ export class ItemService {
                 // Synced trash (7b): a trash is a NORMAL mutation — dirty=true plus a push, so the
                 // trash state propagates to other devices. (Before: local only, dirty=false, and the
                 // mutation dropped.)
-                item.dirty = true;
-                item.localRev = (item.localRev || 0) + 1;
-                item.updated_at = now;
+                touchForPush(item, now);
                 await store.put(item);
                 trashed.push(item);
             }
@@ -629,12 +614,10 @@ export class ItemService {
             // detect deleted_at and show the "File in trash / Restore" placeholder.
             void fileBridge.invalidateFile(it.id).catch(() => {});
             // Push the trash state (offline → the mutation queue).
-            pushItem(it).catch(() => enqueueMutation(it.id, "upsert"));
+            pushOrQueue(it);
         }
 
-        if (typeof window !== "undefined") {
-            window.dispatchEvent(new CustomEvent(APP_EVENTS.vaultItemsChanged));
-        }
+        emitVaultItemsChanged();
     }
 
     static async duplicateItem(
@@ -662,9 +645,7 @@ export class ItemService {
             await ItemService.updateItemPayload(newItem.id, title, html);
         }
 
-        if (typeof window !== "undefined") {
-            window.dispatchEvent(new CustomEvent(APP_EVENTS.vaultItemsChanged));
-        }
+        emitVaultItemsChanged();
         return { item: newItem, strippedAttachments };
     }
 
@@ -705,7 +686,7 @@ export class ItemService {
             }
         }
 
-        const now = Math.floor(Date.now() / 1000);
+        const now = nowSec();
         const restoredItems: LocalItem[] = [];
         const tx = db.transaction("items", "readwrite");
         const store = tx.objectStore("items");
@@ -751,7 +732,7 @@ export class ItemService {
                     }
                 })();
             }
-            pushItem(it).catch(() => enqueueMutation(it.id, "upsert"));
+            pushOrQueue(it);
         }
     }
 
@@ -771,7 +752,7 @@ export class ItemService {
         const allItems = await db.getAll("items");
         const ids = collectDescendants(allItems, seeds, (it) => !!it.deleted_at);
 
-        const now = Math.floor(Date.now() / 1000);
+        const now = nowSec();
         const purgedChunkSets: string[] = [];
         const tx = db.transaction("items", "readwrite");
         const store = tx.objectStore("items");
@@ -809,8 +790,6 @@ export class ItemService {
         // Serialize with other pushes to prevent race conditions
         void pushDeletes([...ids]);
 
-        if (typeof window !== "undefined") {
-            window.dispatchEvent(new CustomEvent(APP_EVENTS.vaultItemsChanged));
-        }
+        emitVaultItemsChanged();
     }
 }

@@ -1,5 +1,11 @@
-import { browser } from "$app/environment";
 import { DEFAULT_CUSTOM_DATE_PATTERN } from "$lib/core/utils/date-pattern";
+import {
+    loadPersisted,
+    rawStringSerde,
+    removePersisted,
+    savePersisted,
+    STORAGE_KEYS,
+} from "$lib/core/utils/persisted";
 
 export type TimeFormat = "system" | "24h" | "12h";
 export type DateFormat =
@@ -10,10 +16,18 @@ export type DateFormat =
     | "yyyy-mm-dd"
     | "custom";
 
-const TIME_FORMAT_KEY = "zknotes:datetime-time-format";
-const DATE_FORMAT_KEY = "zknotes:datetime-date-format";
-const CUSTOM_PATTERN_KEY = "zknotes:datetime-custom-pattern";
-const TIMEZONE_KEY = "zknotes:datetime-timezone";
+// Through the one localStorage wrapper (SSR-safe, try/catch): a blocked storage used to throw out
+// of these setters into the click handler. The stored format is unchanged — raw strings.
+const TIME_FORMAT_KEY = STORAGE_KEYS.dateTimeTimeFormat;
+const DATE_FORMAT_KEY = STORAGE_KEYS.dateTimeDateFormat;
+const CUSTOM_PATTERN_KEY = STORAGE_KEYS.dateTimeCustomPattern;
+const TIMEZONE_KEY = STORAGE_KEYS.dateTimeTimezone;
+// `getItem` semantics: null when the key is absent (an empty string stays an empty string).
+const MISSING = "\u0000missing";
+const raw = (key: string): string | null => {
+    const v = loadPersisted(key, MISSING, rawStringSerde);
+    return v === MISSING ? null : v;
+};
 
 const TIME_FORMATS = new Set<TimeFormat>(["system", "24h", "12h"]);
 const DATE_FORMATS = new Set<DateFormat>([
@@ -26,26 +40,21 @@ const DATE_FORMATS = new Set<DateFormat>([
 ]);
 
 function loadTimeFormat(): TimeFormat {
-    if (!browser) return "system";
-    const v = localStorage.getItem(TIME_FORMAT_KEY);
+    const v = raw(TIME_FORMAT_KEY);
     return v && TIME_FORMATS.has(v as TimeFormat) ? (v as TimeFormat) : "system";
 }
 
 function loadDateFormat(): DateFormat {
-    if (!browser) return "system";
-    const v = localStorage.getItem(DATE_FORMAT_KEY);
+    const v = raw(DATE_FORMAT_KEY);
     return v && DATE_FORMATS.has(v as DateFormat) ? (v as DateFormat) : "system";
 }
 
 function loadCustomPattern(): string {
-    if (!browser) return DEFAULT_CUSTOM_DATE_PATTERN;
-    return localStorage.getItem(CUSTOM_PATTERN_KEY) ?? DEFAULT_CUSTOM_DATE_PATTERN;
+    return raw(CUSTOM_PATTERN_KEY) ?? DEFAULT_CUSTOM_DATE_PATTERN;
 }
 
 function loadTimezone(): string {
-    if (!browser) return "system";
-    const v = localStorage.getItem(TIMEZONE_KEY);
-    return v ?? "system";
+    return raw(TIMEZONE_KEY) ?? "system";
 }
 
 // Never to the server — each device has its own date/time format.
@@ -57,22 +66,22 @@ class DateTimeSettingsStore {
 
     setTimeFormat(v: TimeFormat) {
         this.timeFormat = v;
-        if (browser) localStorage.setItem(TIME_FORMAT_KEY, v);
+        savePersisted(TIME_FORMAT_KEY, v, rawStringSerde);
     }
 
     setDateFormat(v: DateFormat) {
         this.dateFormat = v;
-        if (browser) localStorage.setItem(DATE_FORMAT_KEY, v);
+        savePersisted(DATE_FORMAT_KEY, v, rawStringSerde);
     }
 
     setCustomDatePattern(v: string) {
         this.customDatePattern = v;
-        if (browser) localStorage.setItem(CUSTOM_PATTERN_KEY, v);
+        savePersisted(CUSTOM_PATTERN_KEY, v, rawStringSerde);
     }
 
     setTimezone(v: string) {
         this.timezone = v;
-        if (browser) localStorage.setItem(TIMEZONE_KEY, v);
+        savePersisted(TIMEZONE_KEY, v, rawStringSerde);
     }
 
     /** A reset on logout/delete account — localStorage is per-browser, not per-account. */
@@ -81,11 +90,8 @@ class DateTimeSettingsStore {
         this.dateFormat = "system";
         this.customDatePattern = DEFAULT_CUSTOM_DATE_PATTERN;
         this.timezone = "system";
-        if (browser) {
-            localStorage.removeItem(TIME_FORMAT_KEY);
-            localStorage.removeItem(DATE_FORMAT_KEY);
-            localStorage.removeItem(CUSTOM_PATTERN_KEY);
-            localStorage.removeItem(TIMEZONE_KEY);
+        for (const key of [TIME_FORMAT_KEY, DATE_FORMAT_KEY, CUSTOM_PATTERN_KEY, TIMEZONE_KEY]) {
+            removePersisted(key);
         }
     }
 }

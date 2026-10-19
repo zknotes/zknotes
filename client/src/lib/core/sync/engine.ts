@@ -16,6 +16,7 @@ export {
     isPermanentPushError,
     pushDeletes,
     pushItem,
+    pushOrQueue,
     pushPendingMutations,
     reconcilePendingMutations,
     retryPendingPurgeConflicts,

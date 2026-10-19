@@ -9,6 +9,7 @@
 // the ciphertext from the server and persists it best-effort (behind an LRU cap + a quota guard).
 // Persistence is always an optimisation — a write failure never breaks the decryption.
 import { getChunk } from "$lib/core/api";
+import { toBase64 } from "$lib/core/utils/base64";
 import {
     deleteChunkSet,
     getLocalChunk,
@@ -42,10 +43,7 @@ export function __resetChunkCacheForTest(): void {
 
 async function sha256Base64(bytes: Uint8Array): Promise<string> {
     const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes as BufferSource));
-    // Inline b64, so chunk-loader does not pull the base64 module through the heavy paths
-    let bin = "";
-    for (let i = 0; i < digest.byteLength; i++) bin += String.fromCharCode(digest[i]!);
-    return btoa(bin);
+    return toBase64(digest);
 }
 
 export interface LoadChunkOptions {

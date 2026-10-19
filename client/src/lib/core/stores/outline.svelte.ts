@@ -1,4 +1,10 @@
-import { browser } from "$app/environment";
+import {
+    loadPersisted,
+    rawStringSerde,
+    removePersisted,
+    savePersisted,
+    STORAGE_KEYS,
+} from "$lib/core/utils/persisted";
 import { OUTLINE_MAX_WIDTH, OUTLINE_MIN_WIDTH } from "./outline-model";
 
 export { OUTLINE_MAX_HEADING_LEVEL } from "./outline-model";
@@ -7,19 +13,18 @@ export { OUTLINE_MAX_HEADING_LEVEL } from "./outline-model";
 // note and after a reload until you close it again. One piece of state, no per-note copy, and
 // nothing that opens by itself — a panel that appears while you are typing moves the text under the
 // cursor, which is the part people actually objected to.
-const VISIBLE_KEY = "zknotes:outline-visible";
-const WIDTH_KEY = "zknotes:outline-width";
+// Through the one localStorage wrapper; the stored format is unchanged ("1"/"0", a number string).
+const VISIBLE_KEY = STORAGE_KEYS.outlineVisible;
+const WIDTH_KEY = STORAGE_KEYS.outlineWidth;
 
 const DEFAULT_WIDTH = 220;
 
 function loadVisible(): boolean {
-    if (!browser) return false;
-    return localStorage.getItem(VISIBLE_KEY) === "1";
+    return loadPersisted(VISIBLE_KEY, "0", rawStringSerde) === "1";
 }
 
 function loadWidth(): number {
-    if (!browser) return DEFAULT_WIDTH;
-    const v = Number(localStorage.getItem(WIDTH_KEY));
+    const v = Number(loadPersisted(WIDTH_KEY, "", rawStringSerde));
     return Number.isFinite(v) && v >= OUTLINE_MIN_WIDTH && v <= OUTLINE_MAX_WIDTH
         ? v
         : DEFAULT_WIDTH;
@@ -30,7 +35,7 @@ let width = $state(loadWidth());
 
 function setVisible(v: boolean) {
     visible = v;
-    if (browser) localStorage.setItem(VISIBLE_KEY, v ? "1" : "0");
+    savePersisted(VISIBLE_KEY, v ? "1" : "0", rawStringSerde);
 }
 
 export const outlineStore = {
@@ -42,7 +47,7 @@ export const outlineStore = {
     },
     setWidth(px: number) {
         width = Math.max(OUTLINE_MIN_WIDTH, Math.min(OUTLINE_MAX_WIDTH, px));
-        if (browser) localStorage.setItem(WIDTH_KEY, String(width));
+        savePersisted(WIDTH_KEY, String(width), rawStringSerde);
     },
 
     /**
@@ -71,6 +76,6 @@ export const outlineStore = {
      */
     reset() {
         visible = false;
-        if (browser) localStorage.removeItem(VISIBLE_KEY);
+        removePersisted(VISIBLE_KEY);
     },
 };

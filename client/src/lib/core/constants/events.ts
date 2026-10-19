@@ -54,3 +54,9 @@ export const APP_EVENTS = {
      */
     remoteFileRefsChanged: "file:remote-refs-changed",
 } as const;
+
+/** Tells the UI the IDB items changed (a pull, a mutation, a resolved conflict) — refetch the tree. */
+export function emitVaultItemsChanged(): void {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(new CustomEvent(APP_EVENTS.vaultItemsChanged));
+}

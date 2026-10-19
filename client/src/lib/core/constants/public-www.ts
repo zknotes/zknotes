@@ -1,5 +1,5 @@
+import { PROBE_TIMEOUT_MS } from "$lib/core/constants/reachability";
 import { API_BASE, ApiError, isGatewayDownStatus } from "$lib/core/api/client";
-import { SECOND_MS } from "$lib/core/utils/duration";
 
 /**
  * The runtime commercial data from GET /instance-config.
@@ -59,7 +59,7 @@ export function getInstancePublicConfig(): InstancePublicConfig | null {
 
 // Every request has to end: the sign-in screen asks again on its own while the server is away, and a
 // server that accepts the connection but never answers would otherwise stall that loop for minutes.
-const FETCH_TIMEOUT_MS = 10 * SECOND_MS;
+const FETCH_TIMEOUT_MS = PROBE_TIMEOUT_MS;
 
 /**
  * Asks GET /instance-config again, past the cache, and caches the answer. It **throws** when the
