@@ -28,7 +28,8 @@ import {
 } from "./db/schema";
 import type { DbExecutor } from "./db/types";
 import { nowSec } from "./lib/time";
-import { releaseRestoreStaging } from "./routes/restore";
+import { recomputeUserQuota, updateQuotaTx } from "./services/quota-service";
+import { releaseRestoreStaging } from "./services/restore-service";
 import { S3_BUCKET, s3 } from "./s3";
 import { purgeOwnedItem } from "./services/item-service";
 import { purgeStaleSignInFailures } from "./services/login-throttle";
@@ -223,12 +224,7 @@ export async function runGc(opts: GcOptions = {}): Promise<GcResult> {
                 .limit(1);
             if (!fresh) return null;
             if (fresh.status === "uploading" && fresh.total_size > 0) {
-                await tx
-                    .update(users)
-                    .set({
-                        storage_used_files: sql`GREATEST(0, ${users.storage_used_files} - ${fresh.total_size})`,
-                    })
-                    .where(eq(users.id, fresh.user_id));
+                await updateQuotaTx(tx, fresh.user_id, { files: -fresh.total_size }, false);
             }
             await tx.delete(fileChunks).where(eq(fileChunks.chunk_set_id, fresh.id));
             await tx.delete(uploadSessions).where(eq(uploadSessions.id, fresh.id));
@@ -347,12 +343,7 @@ export async function runGc(opts: GcOptions = {}): Promise<GcResult> {
                 await markPendingDelete(stillOrphan.id, cs.user_id, tx);
                 const size = stillOrphan.total_size;
                 if (size > 0) {
-                    await tx
-                        .update(users)
-                        .set({
-                            storage_used_files: sql`GREATEST(0, ${users.storage_used_files} - ${size})`,
-                        })
-                        .where(eq(users.id, cs.user_id));
+                    await updateQuotaTx(tx, cs.user_id, { files: -size }, false);
                 }
                 return true;
             });
@@ -729,116 +720,11 @@ export async function runDeepRepair(opts: DeepRepairOptions = {}): Promise<DeepR
         committedOrphans++;
     }
 
-    // 4. Reconcile 4-counter storage model (v2 Quota).
-    // In-flight uploadSessions are included in the files quota so the reconcile does not lose reserved quota.
+    // 4. Reconcile the 4-counter storage model (v2 quota) — the formula lives in the quota service
+    // (recomputeUserQuota); the operator's backfill script runs the same function.
     const allUsers = await db.select({ id: users.id }).from(users);
     for (const u of allUsers) {
-        await db.transaction(async (tx) => {
-            const [filesResult] = await tx.execute(sql`
-                SELECT COALESCE(SUM(cs.total_size), 0)::bigint as sum
-                FROM chunk_sets cs
-                WHERE cs.user_id = ${u.id}
-                  AND cs.pending_delete_at IS NULL
-                  AND EXISTS (
-                      SELECT 1 FROM items i
-                      WHERE i.chunk_set_id = cs.id
-                        AND i.user_id = cs.user_id
-                        AND i.deleted_at IS NULL
-                        AND i.purged_at IS NULL
-                  )
-            `);
-
-            const [uploadsResult] = await tx.execute(sql`
-                SELECT COALESCE(SUM(total_size), 0)::bigint as sum
-                FROM upload_sessions
-                WHERE user_id = ${u.id} AND status IN ('uploading', 'restore_staging')
-            `);
-
-            const [restoreSetsResult] = await tx.execute(sql`
-                SELECT COALESCE(SUM(cs.total_size), 0)::bigint as sum
-                FROM chunk_sets cs
-                WHERE cs.user_id = ${u.id}
-                  AND cs.pending_delete_at IS NULL
-                  AND EXISTS (
-                      SELECT 1 FROM restore_sessions rs
-                      WHERE rs.id = cs.restore_session_id
-                        AND rs.status = 'open'
-                  )
-            `);
-
-            const filesSum =
-                Number(filesResult?.sum ?? 0) +
-                Number(uploadsResult?.sum ?? 0) +
-                Number(restoreSetsResult?.sum ?? 0);
-
-            const [itemsResult] = await tx.execute(sql`
-                SELECT COALESCE(SUM(
-                    COALESCE(octet_length(encrypted_payload), 0) +
-                    COALESCE(octet_length(encrypted_item_key), 0) +
-                    COALESCE(octet_length(payload_nonce), 0) +
-                    COALESCE(octet_length(item_key_nonce), 0)
-                ), 0)::bigint as sum
-                FROM items
-                WHERE user_id = ${u.id}
-                  AND deleted_at IS NULL
-                  AND purged_at IS NULL
-                  AND encrypted_payload IS NOT NULL
-            `);
-            const itemsSum = Number(itemsResult?.sum ?? 0);
-
-            const [historyResult] = await tx.execute(sql`
-                SELECT COALESCE(SUM(
-                    COALESCE(octet_length(encrypted_payload), 0) +
-                    COALESCE(octet_length(encrypted_item_key), 0) +
-                    COALESCE(octet_length(payload_nonce), 0) +
-                    COALESCE(octet_length(item_key_nonce), 0)
-                ), 0)::bigint as sum
-                FROM item_history
-                WHERE user_id = ${u.id}
-            `);
-            const historySum = Number(historyResult?.sum ?? 0);
-
-            // Trash = the blobs of trashed files plus the payload bytes of trashed items. The
-            // payload is NOT deleted on soft delete, so it has to enter the counter — otherwise
-            // this reconcile would "fix" the quota back to the old (wrong) value every week.
-            const [trashBlobResult] = await tx.execute(sql`
-                SELECT COALESCE(SUM(cs.total_size), 0)::bigint as sum
-                FROM chunk_sets cs
-                WHERE cs.user_id = ${u.id}
-                  AND cs.pending_delete_at IS NULL
-                  AND EXISTS (
-                      SELECT 1 FROM items i
-                      WHERE i.chunk_set_id = cs.id
-                        AND i.user_id = cs.user_id
-                        AND i.deleted_at IS NOT NULL
-                        AND i.purged_at IS NULL
-                  )
-            `);
-            const [trashPayloadResult] = await tx.execute(sql`
-                SELECT COALESCE(SUM(
-                    COALESCE(octet_length(encrypted_payload), 0) +
-                    COALESCE(octet_length(encrypted_item_key), 0) +
-                    COALESCE(octet_length(payload_nonce), 0) +
-                    COALESCE(octet_length(item_key_nonce), 0)
-                ), 0)::bigint as sum
-                FROM items
-                WHERE user_id = ${u.id}
-                  AND deleted_at IS NOT NULL
-                  AND purged_at IS NULL
-                  AND encrypted_payload IS NOT NULL
-            `);
-            const trashSum =
-                Number(trashBlobResult?.sum ?? 0) + Number(trashPayloadResult?.sum ?? 0);
-
-            await tx.execute(sql`
-                UPDATE users
-                SET storage_used_files = ${filesSum},
-                    storage_used_items = ${itemsSum},
-                    storage_used_history = ${historySum},
-                    storage_used_trash = ${trashSum}
-                WHERE id = ${u.id}
-            `);
-        });
+        await db.transaction((tx) => recomputeUserQuota(tx, u.id));
     }
     const reconciled = allUsers;
 

@@ -25,8 +25,9 @@ import {
     uploadSessions,
     users,
 } from "../db/schema";
+import { ADVISORY_LOCKS } from "../db/advisory-locks";
 import type { DbExecutor } from "../db/types";
-import { authenticatedLimitEnv, ipRateLimit, userRateLimitPreHandler } from "../lib/rate-limit";
+import { authenticatedRouteOptions } from "../lib/rate-limit";
 import { nowSec } from "../lib/time";
 import { parseBody } from "../lib/validate";
 import { wireBlobsToRow } from "../lib/wire";
@@ -41,8 +42,10 @@ import {
     getItemStorageSize as itemStorageSize,
     maxFileCount,
     maxItemsCount,
+    QuotaExceededError,
     updateQuotaTx,
 } from "../services/quota-service";
+import { releaseRestoreStaging } from "../services/restore-service";
 import { deleteS3Prefix } from "../services/storage-service";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -530,80 +533,6 @@ async function touchSession(executor: DbExecutor, id: string, now: number): Prom
         .where(eq(restoreSessions.id, id));
 }
 
-/**
- * Idempotently release the staging (quota plus rows). The S3 prefixes are deleted AFTER the transaction.
- */
-export async function releaseRestoreStaging(
-    executor: DbExecutor,
-    session: SessionRow,
-): Promise<{ prefixes: Array<{ userId: string; id: string }> }> {
-    const prefixes: Array<{ userId: string; id: string }> = [];
-    const staged = await executor
-        .select()
-        .from(restoreStagedItems)
-        .where(eq(restoreStagedItems.restore_session_id, session.id));
-    let itemBytes = 0;
-    for (const row of staged) itemBytes += itemStorageSize(row);
-    if (staged.length > 0) {
-        await executor
-            .delete(restoreStagedItems)
-            .where(eq(restoreStagedItems.restore_session_id, session.id));
-    }
-
-    const uploads = await executor
-        .select()
-        .from(uploadSessions)
-        .where(eq(uploadSessions.restore_session_id, session.id));
-    let fileBytes = 0;
-    for (const u of uploads) {
-        if (u.status === "restore_staging") fileBytes += Number(u.total_size);
-        await executor.delete(fileChunks).where(eq(fileChunks.chunk_set_id, u.id));
-        await executor.delete(uploadSessions).where(eq(uploadSessions.id, u.id));
-        prefixes.push({ userId: u.user_id, id: u.id });
-    }
-
-    const sets = await executor
-        .select()
-        .from(chunkSets)
-        .where(eq(chunkSets.restore_session_id, session.id));
-    for (const cs of sets) {
-        // A live item that references the set keeps it: deleting the blob under a reference loses
-        // the file. Item routes cannot bind a staged set (chunkSetCommitted), so this only guards
-        // a reference that got in some other way; the set stops being staging and stays charged.
-        const [referenced] = await executor
-            .select({ id: items.id })
-            .from(items)
-            .where(
-                and(
-                    eq(items.chunk_set_id, cs.id),
-                    eq(items.user_id, cs.user_id),
-                    isNull(items.purged_at),
-                ),
-            )
-            .limit(1);
-        if (referenced) {
-            await executor
-                .update(chunkSets)
-                .set({ restore_session_id: null })
-                .where(eq(chunkSets.id, cs.id));
-            continue;
-        }
-        const marked = await markPendingDelete(cs.id, cs.user_id, executor);
-        if (marked) fileBytes += Number(cs.total_size);
-        prefixes.push({ userId: cs.user_id, id: cs.id });
-    }
-
-    if (itemBytes !== 0 || fileBytes !== 0) {
-        await updateQuotaTx(
-            executor as Parameters<typeof updateQuotaTx>[0],
-            session.user_id,
-            { items: -itemBytes, files: -fileBytes },
-            false,
-        );
-    }
-    return { prefixes };
-}
-
 async function missingForSession(
     executor: DbExecutor,
     session: SessionRow,
@@ -706,19 +635,7 @@ function stagedParentOk(
 }
 
 const restoreRoutes: FastifyPluginAsync = async (fastify) => {
-    const limits = authenticatedLimitEnv();
-    const userMutRl = userRateLimitPreHandler(fastify, limits.mutUserMax, limits.mutWindow);
-    const userReadRl = userRateLimitPreHandler(fastify, limits.readUserMax, limits.readWindow);
-    const authMut = {
-        preParsing: [fastify.authenticateBeforeBody],
-        preHandler: [userMutRl],
-        config: { rateLimit: ipRateLimit(limits.mutIpMax, limits.mutWindow) },
-    };
-    const authRead = {
-        preParsing: [fastify.authenticateBeforeBody],
-        preHandler: [userReadRl],
-        config: { rateLimit: ipRateLimit(limits.readIpMax, limits.readWindow) },
-    };
+    const { read: authRead, mut: authMut } = authenticatedRouteOptions(fastify);
 
     fastify.post("/restore/sessions", authMut, async (request, reply) => {
         const userId = requireUserId(request);
@@ -909,8 +826,7 @@ const restoreRoutes: FastifyPluginAsync = async (fastify) => {
                             peakFactor: RESTORE_LIMITS.PEAK_FACTOR,
                         });
                     } catch (e: unknown) {
-                        const err = e as { name?: string };
-                        if (err.name === "QuotaExceededError") {
+                        if (e instanceof QuotaExceededError) {
                             throw new RestoreConflict(413, { error: "quota_exceeded" });
                         }
                         throw e;
@@ -1144,7 +1060,7 @@ const restoreRoutes: FastifyPluginAsync = async (fastify) => {
                 const pendingFolders = staged.filter((s) => s.type === "folder");
                 if (pendingFolders.length > 0) {
                     await tx.execute(
-                        sql`SELECT pg_advisory_xact_lock(872014, hashtext(${userId}))`,
+                        sql`SELECT pg_advisory_xact_lock(${ADVISORY_LOCKS.folderMutation}, hashtext(${userId}))`,
                     );
                     const projectedMap = await buildFolderParentMap(userId, tx);
                     for (const row of pendingFolders) {

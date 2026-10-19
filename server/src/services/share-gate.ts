@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import type { db } from "../db";
 import { items, shareLinks, users } from "../db/schema";
 import { minAuthResponseMs } from "../lib/auth-floor";
 import { nowSec } from "../lib/time";
 import { verifyAuthKey } from "./auth-service";
+import { type BackoffPolicy, backoffAfterFailure, policyFromEnv } from "./login-throttle";
 
 type ShareRow = typeof shareLinks.$inferSelect;
 type GateDb = Pick<typeof db, "select" | "update">;
@@ -16,36 +17,17 @@ export const SHARE_BURN_DOWNLOAD_GRACE_SEC = Number(
     process.env.SHARE_BURN_DOWNLOAD_GRACE_SEC ?? 900,
 );
 
-// The per-share password lockout — the same progression as the user login.
-const SHARE_PWD_MAX_ATTEMPTS = Number(process.env.SHARE_PASSWORD_MAX_ATTEMPTS ?? 5);
-const SHARE_PWD_LOCKOUT_BASE_SECONDS = Number(
-    process.env.SHARE_PASSWORD_LOCKOUT_BASE_SECONDS ?? 30,
-);
-const SHARE_PWD_LOCKOUT_MAX_SECONDS = Number(process.env.SHARE_PASSWORD_LOCKOUT_MAX_SECONDS ?? 900);
-const SHARE_PWD_FAIL_WINDOW_SECONDS = Number(
-    process.env.SHARE_PASSWORD_FAIL_WINDOW_SECONDS ?? SHARE_PWD_LOCKOUT_MAX_SECONDS,
-);
-
 /**
- * The failure count after this miss, and the window it belongs to.
- *
- * Failures only accumulate within `windowSeconds` of the first one. Attempts made while locked
- * return early without incrementing, so a monotonic counter measured lock events — which a holder
- * of the link chooses — and one request per expiring lock held a share shut for good.
- *
- * The production write is an atomic UPDATE CASE that must match this arithmetic (a read-modify-write
- * on the chunk path lost increments under parallel guesses).
+ * The per-share password lockout — the same progression as the user login, through the same
+ * `backoffAfterFailure`: 5 failures, then 30 s doubling up to 15 min, inside a window that defaults
+ * to the cap. The window default follows an overridden cap, as it always did.
  */
-export function nextShareFailureCount(
-    previous: { failed_attempts: number; failed_window_started_at: number | null },
-    now: number,
-    windowSeconds: number = SHARE_PWD_FAIL_WINDOW_SECONDS,
-): { attempts: number; windowStartedAt: number } {
-    const startedAt = previous.failed_window_started_at;
-    const withinWindow = startedAt !== null && now - startedAt <= windowSeconds;
-    if (!withinWindow) return { attempts: 1, windowStartedAt: now };
-    return { attempts: previous.failed_attempts + 1, windowStartedAt: startedAt };
-}
+const SHARE_PASSWORD_POLICY: BackoffPolicy = policyFromEnv("SHARE_PASSWORD_", {
+    maxAttempts: 5,
+    baseSeconds: 30,
+    maxSeconds: 900,
+    windowSeconds: Number(process.env.SHARE_PASSWORD_LOCKOUT_MAX_SECONDS ?? 900),
+});
 
 /** The SHA-256 hex of the view_proof (standard base64 on the wire) — not Argon2 (the proof is already 32B of entropy). */
 export function hashViewProof(viewProofB64: string): string {
@@ -62,28 +44,8 @@ export function viewProofMatches(storedHash: string | null, supplied: string | u
     // A share with no stored hash predates the view proof and must not open on the share id alone.
     if (!storedHash) return false;
     if (!supplied) return false;
-    try {
-        return hashViewProof(supplied) === storedHash;
-    } catch {
-        return false;
-    }
-}
-
-/**
- * Did the caller POSITIVELY prove the fragment key? The lockout counter hangs off this: a wrong
- * password is only counted when the caller also holds the fragment key, so anyone who merely saw
- * the share id cannot walk the backoff.
- */
-export function viewProofVerified(
-    storedHash: string | null,
-    supplied: string | undefined,
-): boolean {
-    if (!storedHash || !supplied) return false;
-    try {
-        return hashViewProof(supplied) === storedHash;
-    } catch {
-        return false;
-    }
+    // `Buffer.from(x, "base64")` never throws — garbage simply hashes to something else.
+    return hashViewProof(supplied) === storedHash;
 }
 
 /** Every "unavailable" response shares the same minimum response time (anti-enumeration timing). */
@@ -175,7 +137,10 @@ export async function verifyShareGate(
     if (opts.mode === "chunk" && !viewProofMatches(row.share.view_proof_hash, opts.viewProof)) {
         return finishFail();
     }
-    const proofVerified = viewProofVerified(row.share.view_proof_hash, opts.viewProof);
+    // The lockout counter hangs off a POSITIVELY proven fragment key: a wrong password is only
+    // counted when the caller also holds it, so anyone who merely saw the share id cannot walk the
+    // backoff.
+    const proofVerified = viewProofMatches(row.share.view_proof_hash, opts.viewProof);
 
     // "meta" (GET /shares/:id) exists precisely to tell the client WHETHER a password is needed — it
     // never receives one. The password gate applies only to "view" (a real attempt) and "chunk".
@@ -189,29 +154,25 @@ export async function verifyShareGate(
         const ok = await verifyAuthKey(row.share.share_auth_key_hash, opts.shareAuthKey);
         if (!ok) {
             // Only a proven fragment key may move the counter — otherwise anyone holding just the
-            // share id could walk the backoff. Arithmetic matches `nextShareFailureCount`; the
-            // write is a single UPDATE so parallel guesses on the unlocked chunk path cannot all
-            // read 0 and write 1.
+            // share id could walk the backoff.
             if (proofVerified && (opts.mode === "view" || opts.mode === "chunk")) {
-                const withinWindow = sql`${shareLinks.failed_window_started_at} IS NOT NULL AND ${now} - ${shareLinks.failed_window_started_at} <= ${SHARE_PWD_FAIL_WINDOW_SECONDS}`;
-                const newAttempts = sql`CASE WHEN ${withinWindow} THEN ${shareLinks.failed_attempts} + 1 ELSE 1 END`;
+                // One atomic UPDATE computed from the row as it is now, so parallel guesses on the
+                // unlocked chunk path cannot all read 0 and write 1.
+                const next = backoffAfterFailure(
+                    {
+                        attempts: shareLinks.failed_attempts,
+                        windowStart: shareLinks.failed_window_started_at,
+                        lockedUntil: shareLinks.locked_until,
+                    },
+                    now,
+                    SHARE_PASSWORD_POLICY,
+                );
                 await tx
                     .update(shareLinks)
                     .set({
-                        failed_attempts: newAttempts,
-                        failed_window_started_at: sql`CASE WHEN ${withinWindow} THEN ${shareLinks.failed_window_started_at} ELSE ${now} END`,
-                        locked_until: sql`CASE
-                            WHEN (${newAttempts}) >= ${SHARE_PWD_MAX_ATTEMPTS}
-                            THEN ${now} + LEAST(
-                                ${SHARE_PWD_LOCKOUT_BASE_SECONDS}::numeric * POWER(
-                                    2,
-                                    GREATEST(0, (${newAttempts}) - ${SHARE_PWD_MAX_ATTEMPTS})
-                                ),
-                                ${SHARE_PWD_LOCKOUT_MAX_SECONDS}
-                            )::bigint
-                            WHEN (${newAttempts}) = 1 THEN NULL
-                            ELSE ${shareLinks.locked_until}
-                        END`,
+                        failed_attempts: next.attempts,
+                        failed_window_started_at: next.windowStart,
+                        locked_until: next.lockedUntil,
                         updated_at: now,
                     })
                     .where(eq(shareLinks.id, shareId));

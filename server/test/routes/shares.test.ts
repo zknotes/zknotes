@@ -10,7 +10,6 @@ import { runGc } from "../../src/gc";
 import { hashAuthKey } from "../../src/services/auth-service";
 import {
     isShareChunkAccessible,
-    nextShareFailureCount,
     SHARE_BURN_DOWNLOAD_GRACE_SEC,
 } from "../../src/services/share-gate";
 import {
@@ -1027,35 +1026,6 @@ describe("burn download grace (chunk gate)", () => {
             payload: viewPayload(),
         });
         expect(view2.json().burn_download_grace_sec).toBeUndefined();
-    });
-});
-
-describe("nextShareFailureCount", () => {
-    const WINDOW = 900;
-    const at = (attempts: number, windowStartedAt: number | null) => ({
-        failed_attempts: attempts,
-        failed_window_started_at: windowStartedAt,
-    });
-
-    test("a first failure opens a window", () => {
-        expect(nextShareFailureCount(at(0, null), 1000, WINDOW)).toEqual({
-            attempts: 1,
-            windowStartedAt: 1000,
-        });
-    });
-
-    test("a failure inside the window increments and keeps the window's start", () => {
-        expect(nextShareFailureCount(at(4, 1000), 1500, WINDOW)).toEqual({
-            attempts: 5,
-            windowStartedAt: 1000,
-        });
-    });
-
-    test("one second past the boundary starts a fresh run", () => {
-        expect(nextShareFailureCount(at(9, 1000), 1000 + WINDOW + 1, WINDOW)).toEqual({
-            attempts: 1,
-            windowStartedAt: 1000 + WINDOW + 1,
-        });
     });
 });
 

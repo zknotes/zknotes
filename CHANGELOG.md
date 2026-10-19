@@ -23,6 +23,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ### Fixed
 
+- Storage: when an edit re-attaches a file to a blob that was about to be deleted (a conflict copy
+  of a purged file, say), the blob's bytes now count against the quota again at once, as they
+  already did when such a file was created; before, the files counter under-reported until the
+  weekly repair.
 - Search now lists files under their file name. A file that arrived by sync, or was indexed when
   the index was rebuilt, used to be indexed as "Untitled", so typing "unt" listed every file.
 - A session that expires while a backup is being restored now locks the vault and returns to

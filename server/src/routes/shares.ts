@@ -6,7 +6,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { db } from "../db";
 import { items, shareAttachments, shareLinks, users } from "../db/schema";
 import { AUTH_BODY_LIMIT } from "../lib/auth-floor";
-import { authenticatedLimitEnv, ipRateLimit, userRateLimitPreHandler } from "../lib/rate-limit";
+import { authenticatedRouteOptions, ipRateLimit } from "../lib/rate-limit";
 import { nowSec } from "../lib/time";
 import { parseBody } from "../lib/validate";
 import { bufToB64, requireB64ToBuf } from "../lib/wire";
@@ -122,19 +122,7 @@ function attachmentToWire(
 }
 
 const shareRoutes: FastifyPluginAsync = async (fastify) => {
-    const limits = authenticatedLimitEnv();
-    const userMutRl = userRateLimitPreHandler(fastify, limits.mutUserMax, limits.mutWindow);
-    const userReadRl = userRateLimitPreHandler(fastify, limits.readUserMax, limits.readWindow);
-    const authRead = {
-        preParsing: [fastify.authenticateBeforeBody],
-        preHandler: [userReadRl],
-        config: { rateLimit: ipRateLimit(limits.readIpMax, limits.readWindow) },
-    };
-    const authMut = {
-        preParsing: [fastify.authenticateBeforeBody],
-        preHandler: [userMutRl],
-        config: { rateLimit: ipRateLimit(limits.mutIpMax, limits.mutWindow) },
-    };
+    const { read: authRead, mut: authMut, userMutRl } = authenticatedRouteOptions(fastify);
 
     fastify.post(
         "/shares",

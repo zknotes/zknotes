@@ -14,19 +14,22 @@ import { and, asc, eq, gte, inArray, isNull, type SQL, sql } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
 import { chunkSetCommitted } from "../blob-sweeper";
 import { db } from "../db";
+import { ADVISORY_LOCKS } from "../db/advisory-locks";
 import { chunkSets, items, syncDeletedLog } from "../db/schema";
-import { authenticatedLimitEnv, ipRateLimit, userRateLimitPreHandler } from "../lib/rate-limit";
+import { authenticatedRouteOptions, ipRateLimit } from "../lib/rate-limit";
 import { clampDeletedAt, issuedWatermarkMs, nowSec, parseTimestampParam } from "../lib/time";
 import { parseBody } from "../lib/validate";
 import { itemToWire, wireBlobsToRow, wireBlobsToRowPartial } from "../lib/wire";
 import { requireUserId } from "../plugins/auth";
 import {
+    bindFileSet,
     buildFolderParentMap,
     countLiveFiles,
     createItemTx,
-    fileSetInvalid,
+    fileSetBindable,
     getOwnedItem,
     hasOtherLiveChunkSetRef,
+    ItemRejected,
     purgeOwnedItem,
     purgeOwnedItemsBatch,
     releaseChunkSetIfUnreferenced,
@@ -37,6 +40,7 @@ import {
     countUserItems,
     getItemStorageSize,
     itemCountExceeded,
+    QuotaExceededError,
     type QuotaAccumulator,
     updateQuotaTx,
 } from "../services/quota-service";
@@ -102,19 +106,7 @@ class ItemVersionConflictError extends Error {
 const itemRoutes: FastifyPluginAsync = async (fastify) => {
     const itemsBatchRlWindow = process.env.ITEMS_BATCH_RATELIMIT_WINDOW ?? "1 minute";
     const itemsBatchRlMax = Number(process.env.ITEMS_BATCH_RATE_LIMIT_MAX ?? 600);
-    const limits = authenticatedLimitEnv();
-    const userMutRl = userRateLimitPreHandler(fastify, limits.mutUserMax, limits.mutWindow);
-    const userReadRl = userRateLimitPreHandler(fastify, limits.readUserMax, limits.readWindow);
-    const authMut = {
-        preParsing: [fastify.authenticateBeforeBody],
-        preHandler: [userMutRl],
-        config: { rateLimit: ipRateLimit(limits.mutIpMax, limits.mutWindow) },
-    };
-    const authRead = {
-        preParsing: [fastify.authenticateBeforeBody],
-        preHandler: [userReadRl],
-        config: { rateLimit: ipRateLimit(limits.readIpMax, limits.readWindow) },
-    };
+    const { read: authRead, mut: authMut, userMutRl } = authenticatedRouteOptions(fastify);
 
     fastify.get("/items", authRead, async (request, reply) => {
         const userId = requireUserId(request);
@@ -334,27 +326,19 @@ const itemRoutes: FastifyPluginAsync = async (fastify) => {
                 // Item-count ceiling — on creation only, inside the same transaction as the insert
                 // so there is no TOCTOU window.
                 if (await itemCountExceeded(tx, userId, 1)) {
-                    throw new Error(
-                        "CREATE_ERROR:" +
-                            JSON.stringify({ status: 413, error: "item_limit_exceeded" }),
-                    );
+                    throw new ItemRejected(413, "item_limit_exceeded");
                 }
                 await updateQuotaTx(tx, userId, { items: dItems }, true);
                 const res = await createItemTx(tx, userId, data);
-                if (res.kind === "error") {
-                    throw new Error("CREATE_ERROR:" + JSON.stringify(res));
-                }
+                if (res.kind === "error") throw new ItemRejected(res.status, res.error);
                 return res;
             });
             return reply.status(201).send(itemToWire(outcome.row));
-        } catch (e: any) {
-            if (e.name === "QuotaExceededError") {
+        } catch (e: unknown) {
+            if (e instanceof QuotaExceededError) {
                 return reply.status(413).send({ error: "hard_limit_exceeded" });
             }
-            if (e.message?.startsWith("CREATE_ERROR:")) {
-                const res = JSON.parse(e.message.split("CREATE_ERROR:")[1]);
-                return reply.status(res.status).send({ error: res.error });
-            }
+            if (e instanceof ItemRejected) return reply.status(e.status).send({ error: e.error });
             throw e;
         }
     });
@@ -408,15 +392,9 @@ const itemRoutes: FastifyPluginAsync = async (fastify) => {
             }
         }
 
-        if (await fileSetInvalid(current.type, data.chunk_set_id, userId)) {
-            return reply.status(409).send({ error: "Referenced chunk set is not committed" });
-        }
-        if (
-            current.type === "file" &&
-            data.chunk_set_id &&
-            data.chunk_set_id !== current.chunk_set_id &&
-            !(await chunkSetCommitted(data.chunk_set_id, userId))
-        ) {
+        // Only a file may carry a chunk set. Whether a CHANGED set is committed — or a pending one
+        // can be brought back and re-charged — is decided inside the transaction, next to the row lock.
+        if (!fileSetBindable(current.type, data.chunk_set_id)) {
             return reply.status(409).send({ error: "Referenced chunk set is not committed" });
         }
 
@@ -440,7 +418,7 @@ const itemRoutes: FastifyPluginAsync = async (fastify) => {
 
         let dItems = 0;
         const oldPayloadSize = getItemStorageSize(current);
-        const mergedData = { ...current, ...data } as any;
+        const mergedData = { ...current, ...data };
         const newPayloadSize = getItemStorageSize(mergedData);
         dItems = newPayloadSize - oldPayloadSize;
 
@@ -458,6 +436,14 @@ const itemRoutes: FastifyPluginAsync = async (fastify) => {
                 if (locked.version !== data.version) {
                     throw new ItemVersionConflictError(locked);
                 }
+                if (
+                    locked.type === "file" &&
+                    data.chunk_set_id &&
+                    data.chunk_set_id !== locked.chunk_set_id
+                ) {
+                    const bound = await bindFileSet(tx, userId, data.chunk_set_id);
+                    if (!bound.ok) throw new ItemRejected(bound.status, bound.error);
+                }
 
                 // Folder-move TOCTOU (the same pattern as batch): the pre-flight cycle check
                 // above runs outside the transaction on a possibly stale snapshot. Two parallel PUTs
@@ -474,7 +460,7 @@ const itemRoutes: FastifyPluginAsync = async (fastify) => {
                     data.parent_id !== null
                 ) {
                     await tx.execute(
-                        sql`SELECT pg_advisory_xact_lock(872014, hashtext(${userId}))`,
+                        sql`SELECT pg_advisory_xact_lock(${ADVISORY_LOCKS.folderMutation}, hashtext(${userId}))`,
                     );
                     const lockedMap = await buildFolderParentMap(userId, tx);
                     if (createsCycle(id, data.parent_id, lockedMap)) {
@@ -531,7 +517,8 @@ const itemRoutes: FastifyPluginAsync = async (fastify) => {
                     .status(409)
                     .send({ error: "Conflict: version mismatch", current_item: e.currentItem });
             }
-            if (e.name === "QuotaExceededError") {
+            if (e instanceof ItemRejected) return reply.status(e.status).send({ error: e.error });
+            if (e instanceof QuotaExceededError) {
                 return reply.status(413).send({ error: "hard_limit_exceeded" });
             }
             if (e.message === "CYCLE_DETECTED") {
@@ -689,7 +676,7 @@ const itemRoutes: FastifyPluginAsync = async (fastify) => {
                     // mutations; then the cycle is re-checked inside the transaction on a fresh map.
                     if (pendingFolderUpserts.length > 0) {
                         await tx.execute(
-                            sql`SELECT pg_advisory_xact_lock(872014, hashtext(${userId}))`,
+                            sql`SELECT pg_advisory_xact_lock(${ADVISORY_LOCKS.folderMutation}, hashtext(${userId}))`,
                         );
                         const lockedMap = await buildFolderParentMap(userId, tx);
                         for (const item of pendingFolderUpserts) {
@@ -881,7 +868,7 @@ const itemRoutes: FastifyPluginAsync = async (fastify) => {
                                     accumulator: quotaAcc,
                                 });
                             } catch (e: any) {
-                                if (e.name === "QuotaExceededError") {
+                                if (e instanceof QuotaExceededError) {
                                     errors.push({ id: itemData.id, error: "hard_limit_exceeded" });
                                     continue;
                                 }
@@ -939,14 +926,7 @@ const itemRoutes: FastifyPluginAsync = async (fastify) => {
                                 continue;
                             }
 
-                            if (
-                                await fileSetInvalid(
-                                    current.type,
-                                    itemData.chunk_set_id,
-                                    userId,
-                                    tx,
-                                )
-                            ) {
+                            if (!fileSetBindable(current.type, itemData.chunk_set_id)) {
                                 errors.push({
                                     id: itemData.id,
                                     error: "Referenced chunk set is not committed",
@@ -956,14 +936,15 @@ const itemRoutes: FastifyPluginAsync = async (fastify) => {
                             if (
                                 current.type === "file" &&
                                 itemData.chunk_set_id &&
-                                itemData.chunk_set_id !== current.chunk_set_id &&
-                                !(await chunkSetCommitted(itemData.chunk_set_id, userId, tx))
+                                itemData.chunk_set_id !== current.chunk_set_id
                             ) {
-                                errors.push({
-                                    id: itemData.id,
-                                    error: "Referenced chunk set is not committed",
+                                const bound = await bindFileSet(tx, userId, itemData.chunk_set_id, {
+                                    accumulator: quotaAcc,
                                 });
-                                continue;
+                                if (!bound.ok) {
+                                    errors.push({ id: itemData.id, error: bound.error });
+                                    continue;
+                                }
                             }
 
                             const oldPayloadSize = getItemStorageSize(current);
@@ -1038,7 +1019,7 @@ const itemRoutes: FastifyPluginAsync = async (fastify) => {
                                     { accumulator: quotaAcc },
                                 );
                             } catch (e: any) {
-                                if (e.name === "QuotaExceededError") {
+                                if (e instanceof QuotaExceededError) {
                                     errors.push({ id: itemData.id, error: "hard_limit_exceeded" });
                                     continue;
                                 }

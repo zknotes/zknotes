@@ -5,6 +5,7 @@
  *
  * Usage: bun run /app/server/migrate.ts
  */
+import { ADVISORY_LOCKS } from "./src/db/advisory-locks";
 import { resolve } from "node:path";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
@@ -17,7 +18,7 @@ const client = postgres(url, { onnotice: () => {} });
 const db = drizzle({ client });
 
 // Session-level lock so two API replicas cannot race drizzle migrate() on a shared database.
-const MIGRATE_LOCK_KEY = 872_015_001;
+const MIGRATE_LOCK_KEY = ADVISORY_LOCKS.migrate;
 
 await client`SELECT pg_advisory_lock(${MIGRATE_LOCK_KEY})`;
 try {

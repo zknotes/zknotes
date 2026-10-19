@@ -37,3 +37,6 @@ export const SESSION_COOKIE_BASE = {
 export function clearSessionCookie(reply: FastifyReply): void {
     reply.clearCookie(SESSION_COOKIE, SESSION_COOKIE_BASE);
 }
+
+/** How long a vault session lives; the auth plugin slides it when more than half has passed. */
+export const SESSION_TTL_SECONDS: number = Number(process.env.SESSION_TTL_SECONDS ?? 2592000); // 30 days

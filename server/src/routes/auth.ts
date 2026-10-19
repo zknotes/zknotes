@@ -17,10 +17,10 @@ import { sessions, users } from "../db/schema";
 import { OPEN_REGISTRATION, type RegistrationStatus } from "../entitlements";
 import { AUTH_BODY_LIMIT, authResponseFloor } from "../lib/auth-floor";
 import {
-    authenticatedLimitEnv,
+    authenticatedRouteOptions,
+    authRateLimitWindow,
     ipRateLimit,
     rateLimitKey,
-    userRateLimitPreHandler,
 } from "../lib/rate-limit";
 import { assertProductionSecret } from "../lib/secrets";
 import {
@@ -28,6 +28,7 @@ import {
     hashSessionToken,
     SESSION_COOKIE,
     SESSION_COOKIE_BASE,
+    SESSION_TTL_SECONDS,
 } from "../lib/session-token";
 import { nowSec } from "../lib/time";
 import { parseBody } from "../lib/validate";
@@ -45,10 +46,9 @@ import { purgeUserData } from "../services/uploads-service";
 export { DEFAULT_AUTH_JITTER_MS } from "../lib/auth-floor";
 const KDF_FAKE_DEV_SEED = "dev-fake-seed-change-in-prod";
 const KDF_FAKE_SEED = process.env.KDF_FAKE_SEED || KDF_FAKE_DEV_SEED;
-export const SESSION_TTL_SECONDS: number = Number(process.env.SESSION_TTL_SECONDS ?? 2592000); // 30 days
 
 // The IP rate limit for the unauthenticated auth routes (anti-brute-force, and anti-enumeration slowdown).
-const RL_WINDOW = process.env.AUTH_RATELIMIT_WINDOW ?? "15 minutes";
+const RL_WINDOW = authRateLimitWindow();
 const RL_LOGIN_MAX = Number(process.env.AUTH_LOGIN_RATELIMIT_MAX ?? 10);
 // A throttle for authenticated sensitive routes (change-password / DELETE account) — it limits
 // brute-forcing `current_auth_key`/`auth_key` even with a stolen session.
@@ -131,19 +131,7 @@ const authRoutes: FastifyPluginAsync = async (fastify) => {
         dummyAuthHash = await hashAuthKey("dummy_key");
     });
 
-    const limits = authenticatedLimitEnv();
-    const userMutRl = userRateLimitPreHandler(fastify, limits.mutUserMax, limits.mutWindow);
-    const userReadRl = userRateLimitPreHandler(fastify, limits.readUserMax, limits.readWindow);
-    const authRead = {
-        preParsing: [fastify.authenticateBeforeBody],
-        preHandler: [userReadRl],
-        config: { rateLimit: ipRateLimit(limits.readIpMax, limits.readWindow) },
-    };
-    const authMut = {
-        preParsing: [fastify.authenticateBeforeBody],
-        preHandler: [userMutRl],
-        config: { rateLimit: ipRateLimit(limits.mutIpMax, limits.mutWindow) },
-    };
+    const { read: authRead, mut: authMut, userMutRl } = authenticatedRouteOptions(fastify);
 
     // Public registration status for the register UI (disabling the form, count/cap).
     // A read-only COUNT — no enumeration risk, hence no auth timing defence.

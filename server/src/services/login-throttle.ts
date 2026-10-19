@@ -30,7 +30,7 @@ export interface BackoffPolicy {
     windowSeconds: number;
 }
 
-function policyFromEnv(prefix: string, defaults: BackoffPolicy): BackoffPolicy {
+export function policyFromEnv(prefix: string, defaults: BackoffPolicy): BackoffPolicy {
     const read = (name: string, fallback: number) => Number(process.env[prefix + name] ?? fallback);
     return {
         maxAttempts: read("MAX_ATTEMPTS", defaults.maxAttempts),
@@ -65,7 +65,7 @@ export const ACCOUNT_POLICY = policyFromEnv("USER_LOGIN_ACCOUNT_", {
     windowSeconds: 3600,
 });
 
-interface BackoffColumns {
+export interface BackoffColumns {
     attempts: AnyPgColumn;
     windowStart: AnyPgColumn;
     lockedUntil: AnyPgColumn;
@@ -76,7 +76,7 @@ interface BackoffColumns {
  * now — never from a snapshot read before the Argon2 check, or parallel failures would all write the
  * same count and never lock. `LEAST(base * 2^(over), max)` — the same formula as the share gate.
  */
-function backoffAfterFailure(
+export function backoffAfterFailure(
     cols: BackoffColumns,
     now: number,
     p: BackoffPolicy,

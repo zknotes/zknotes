@@ -4,6 +4,7 @@
 //
 // Before this: abort was a local function in routes/files.ts (one chunkSetId), and self-delete did a
 // bare `db.delete(users)` (an S3 leak — it neither marked chunk_sets nor cleaned up file_chunks).
+import { updateQuotaTx } from "./quota-service";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { chunkSets, fileChunks, uploadSessions, users } from "../db/schema";
 import type { DbTransaction } from "../db/types";
@@ -31,10 +32,8 @@ export async function abortAllUserUploads(tx: DbTransaction, userId: string): Pr
     const reserved = uploading.reduce((sum, s) => sum + s.total_size, 0);
     const ids = uploading.map((s) => s.id);
 
-    await tx
-        .update(users)
-        .set({ storage_used_files: sql`GREATEST(0, ${users.storage_used_files} - ${reserved})` })
-        .where(eq(users.id, userId));
+    // The reservation leaves the files bucket through the quota service, like every other release.
+    await updateQuotaTx(tx, userId, { files: -reserved }, false);
 
     await tx.delete(fileChunks).where(inArray(fileChunks.chunk_set_id, ids));
 

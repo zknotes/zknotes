@@ -1,8 +1,21 @@
 import { BACKSTOP_FACTOR, FILE_LIMITS, ITEM_LIMITS } from "@zknotes/shared";
 import { eq, inArray, sql } from "drizzle-orm";
-import type { PgTransaction } from "drizzle-orm/pg-core";
 import { db } from "../db";
 import { chunkSets, items, users } from "../db/schema";
+import type { DbExecutor } from "../db/types";
+
+/**
+ * The hard limit (quota × backstop factor) would be crossed. A class, so callers match it with
+ * `instanceof` instead of comparing `err.name` strings, and so the global error handler could map
+ * it by `statusCode`.
+ */
+export class QuotaExceededError extends Error {
+    readonly statusCode = 413;
+    constructor() {
+        super("hard_limit_exceeded");
+        this.name = "QuotaExceededError";
+    }
+}
 
 /**
  * A helper structure for tracking changes across the four quota categories (bytes).
@@ -33,10 +46,7 @@ export function maxFileCount(): number {
 }
 
 /** A user's total item count (notes + folders + files, Trash included). */
-export async function countUserItems(
-    tx: PgTransaction<any, any, any>,
-    userId: string,
-): Promise<number> {
+export async function countUserItems(tx: DbExecutor, userId: string): Promise<number> {
     const [result] = await tx
         .select({ count: sql<number>`count(*)::int` })
         .from(items)
@@ -52,7 +62,7 @@ export async function countUserItems(
  * create loop counts ONCE and then increments locally, instead of an N+1 COUNT per item.
  */
 export async function itemCountExceeded(
-    tx: PgTransaction<any, any, any>,
+    tx: DbExecutor,
     userId: string,
     deltaCount: number,
     knownCount?: number,
@@ -81,11 +91,8 @@ export interface QuotaAccumulator {
     dirty: boolean;
 }
 
-/** Locks the `users` row once and seeds an in-memory accumulator for `updateQuotaTx` to fold into. */
-export async function beginQuotaAccumulator(
-    tx: PgTransaction<any, any, any>,
-    userId: string,
-): Promise<QuotaAccumulator> {
+/** The four counters plus the quota, read under `FOR UPDATE` — every quota write goes through this lock. */
+async function lockUserQuotaRow(tx: DbExecutor, userId: string) {
     const [user] = await tx
         .select({
             storage_quota: users.storage_quota,
@@ -99,6 +106,15 @@ export async function beginQuotaAccumulator(
         .where(eq(users.id, userId))
         .for("update")
         .limit(1);
+    return user;
+}
+
+/** Locks the `users` row once and seeds an in-memory accumulator for `updateQuotaTx` to fold into. */
+export async function beginQuotaAccumulator(
+    tx: DbExecutor,
+    userId: string,
+): Promise<QuotaAccumulator> {
+    const user = await lockUserQuotaRow(tx, userId);
     if (!user) throw new Error("User not found for quota update");
     return {
         files: user.used_files,
@@ -113,7 +129,7 @@ export async function beginQuotaAccumulator(
 
 /** Flushes an accumulator's final tallies with a single `UPDATE` — a no-op if nothing changed. */
 export async function commitQuotaAccumulator(
-    tx: PgTransaction<any, any, any>,
+    tx: DbExecutor,
     userId: string,
     acc: QuotaAccumulator,
 ): Promise<void> {
@@ -146,7 +162,7 @@ export async function commitQuotaAccumulator(
  *                        the DB write is deferred to `commitQuotaAccumulator`.
  */
 export async function updateQuotaTx(
-    tx: PgTransaction<any, any, any>,
+    tx: DbExecutor,
     userId: string,
     deltas: QuotaDeltas,
     enforceStrictLimit: boolean = true,
@@ -171,9 +187,7 @@ export async function updateQuotaTx(
             const factor = opts?.peakFactor ?? BACKSTOP_FACTOR;
             const hardLimit = acc.quota * factor;
             if (newTotal > hardLimit && newTotal > acc.total_used) {
-                const err = new Error("hard_limit_exceeded");
-                err.name = "QuotaExceededError";
-                throw err;
+                throw new QuotaExceededError();
             }
         }
 
@@ -186,19 +200,7 @@ export async function updateQuotaTx(
     }
 
     // Lock the user row for the update
-    const [user] = await tx
-        .select({
-            storage_quota: users.storage_quota,
-            used_files: users.storage_used_files,
-            used_items: users.storage_used_items,
-            used_history: users.storage_used_history,
-            used_trash: users.storage_used_trash,
-            total_used: users.storage_used,
-        })
-        .from(users)
-        .where(eq(users.id, userId))
-        .for("update")
-        .limit(1);
+    const user = await lockUserQuotaRow(tx, userId);
 
     if (!user) throw new Error("User not found for quota update");
 
@@ -213,10 +215,7 @@ export async function updateQuotaTx(
         const factor = opts?.peakFactor ?? BACKSTOP_FACTOR;
         const hardLimit = user.storage_quota * factor;
         if (newTotal > hardLimit && newTotal > (user.total_used ?? 0)) {
-            // We throw a custom error the routes can catch
-            const err = new Error("hard_limit_exceeded");
-            err.name = "QuotaExceededError";
-            throw err;
+            throw new QuotaExceededError();
         }
     }
 
@@ -263,4 +262,125 @@ export function getItemStorageSize(item: {
                 ? Buffer.byteLength(item.item_key_nonce, "base64")
                 : item.item_key_nonce.length;
     return size;
+}
+
+/** The four reconstructed counters of one user. */
+export interface RecomputedQuota {
+    files: number;
+    items: number;
+    history: number;
+    trash: number;
+}
+
+// The byte size of an item row's four ciphertext columns, as SQL — the same arithmetic as
+// `getItemStorageSize` applied in the database.
+const itemBytesSql = sql`COALESCE(SUM(
+    COALESCE(octet_length(encrypted_payload), 0) +
+    COALESCE(octet_length(encrypted_item_key), 0) +
+    COALESCE(octet_length(payload_nonce), 0) +
+    COALESCE(octet_length(item_key_nonce), 0)
+), 0)::bigint`;
+
+const sumOf = (rows: Array<Record<string, unknown>>): number => Number(rows[0]?.sum ?? 0);
+
+/**
+ * Rebuilds the four storage counters of one user from the rows themselves and writes them — the one
+ * definition of what belongs in which bucket. The weekly deep repair (`gc.ts`) and the operator's
+ * backfill script both call it; they used to carry the same seven queries each, with a comment asking
+ * that the two copies be kept identical.
+ *
+ *  - files:   committed blobs referenced by a live, non-trashed item, plus the bytes reserved by
+ *             in-flight uploads and open restore staging (so a reconcile never loses a reservation);
+ *  - items:   payload bytes of live, non-trashed items;
+ *  - history: payload bytes of every history snapshot;
+ *  - trash:   blobs of trashed files AND the payload bytes of trashed items — a soft delete keeps
+ *             the ciphertext, so those bytes stay in a counter (otherwise this repair would "fix"
+ *             the quota back to an old, wrong value every week).
+ */
+export async function recomputeUserQuota(
+    exec: DbExecutor,
+    userId: string,
+): Promise<RecomputedQuota> {
+    const liveBlobs = await exec.execute(sql`
+        SELECT COALESCE(SUM(cs.total_size), 0)::bigint as sum
+        FROM chunk_sets cs
+        WHERE cs.user_id = ${userId}
+          AND cs.pending_delete_at IS NULL
+          AND EXISTS (
+              SELECT 1 FROM items i
+              WHERE i.chunk_set_id = cs.id
+                AND i.user_id = cs.user_id
+                AND i.deleted_at IS NULL
+                AND i.purged_at IS NULL
+          )
+    `);
+    const uploads = await exec.execute(sql`
+        SELECT COALESCE(SUM(total_size), 0)::bigint as sum
+        FROM upload_sessions
+        WHERE user_id = ${userId} AND status IN ('uploading', 'restore_staging')
+    `);
+    const restoreSets = await exec.execute(sql`
+        SELECT COALESCE(SUM(cs.total_size), 0)::bigint as sum
+        FROM chunk_sets cs
+        WHERE cs.user_id = ${userId}
+          AND cs.pending_delete_at IS NULL
+          AND EXISTS (
+              SELECT 1 FROM restore_sessions rs
+              WHERE rs.id = cs.restore_session_id
+                AND rs.status = 'open'
+          )
+    `);
+    const liveItems = await exec.execute(sql`
+        SELECT ${itemBytesSql} as sum
+        FROM items
+        WHERE user_id = ${userId}
+          AND deleted_at IS NULL
+          AND purged_at IS NULL
+          AND encrypted_payload IS NOT NULL
+    `);
+    const history = await exec.execute(sql`
+        SELECT ${itemBytesSql} as sum
+        FROM item_history
+        WHERE user_id = ${userId}
+    `);
+    const trashedBlobs = await exec.execute(sql`
+        SELECT COALESCE(SUM(cs.total_size), 0)::bigint as sum
+        FROM chunk_sets cs
+        WHERE cs.user_id = ${userId}
+          AND cs.pending_delete_at IS NULL
+          AND EXISTS (
+              SELECT 1 FROM items i
+              WHERE i.chunk_set_id = cs.id
+                AND i.user_id = cs.user_id
+                AND i.deleted_at IS NOT NULL
+                AND i.purged_at IS NULL
+          )
+    `);
+    const trashedItems = await exec.execute(sql`
+        SELECT ${itemBytesSql} as sum
+        FROM items
+        WHERE user_id = ${userId}
+          AND deleted_at IS NOT NULL
+          AND purged_at IS NULL
+          AND encrypted_payload IS NOT NULL
+    `);
+
+    const result: RecomputedQuota = {
+        files: sumOf([...liveBlobs]) + sumOf([...uploads]) + sumOf([...restoreSets]),
+        items: sumOf([...liveItems]),
+        history: sumOf([...history]),
+        trash: sumOf([...trashedBlobs]) + sumOf([...trashedItems]),
+    };
+
+    await exec
+        .update(users)
+        .set({
+            storage_used_files: result.files,
+            storage_used_items: result.items,
+            storage_used_history: result.history,
+            storage_used_trash: result.trash,
+        })
+        .where(eq(users.id, userId));
+
+    return result;
 }

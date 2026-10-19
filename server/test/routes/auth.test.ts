@@ -14,7 +14,7 @@ import { and, count, eq, sql } from "drizzle-orm";
 import type { FastifyInstance, LightMyRequestResponse } from "fastify";
 import { uuidv7 } from "uuidv7";
 import { buildApp } from "../../src/app";
-import { SESSION_TTL_SECONDS } from "../../src/routes/auth";
+import { SESSION_TTL_SECONDS } from "../../src/lib/session-token";
 import { db } from "../../src/db";
 import { chunkSets, loginFailures, sessions, users } from "../../src/db/schema";
 import { nowSec } from "../../src/lib/time";

@@ -16,15 +16,14 @@ import type { FastifyPluginAsync } from "fastify";
 import { db } from "../db";
 import { OPEN_REGISTRATION } from "../entitlements";
 import { AUTH_BODY_LIMIT, authResponseFloor } from "../lib/auth-floor";
-import { ipRateLimit } from "../lib/rate-limit";
+import { ADVISORY_LOCKS } from "../db/advisory-locks";
+import { authRateLimitWindow, ipRateLimit } from "../lib/rate-limit";
 import { Argon2BacklogError } from "../services/auth-service";
 import { createVaultUser } from "../services/vault-service";
 
-// Duplicated from auth.ts (do not import the auth routes module from here).
-const RL_WINDOW = process.env.AUTH_RATELIMIT_WINDOW ?? "15 minutes";
+const RL_WINDOW = authRateLimitWindow();
 const RL_REGISTER_MAX = Number(process.env.AUTH_REGISTER_RATELIMIT_MAX ?? 5);
-/** Transaction-level advisory lock that serialises vault creation (migrate.ts uses 872_015_001). */
-const VAULT_CREATE_LOCK_KEY = 872_015_002;
+const VAULT_CREATE_LOCK_KEY = ADVISORY_LOCKS.vaultCreate;
 
 const postgresErrorCode = (err: unknown): string | undefined => {
     const direct = (err as { code?: string } | null)?.code;

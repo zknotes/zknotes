@@ -8,9 +8,9 @@ import {
     hashSessionToken,
     SESSION_COOKIE,
     SESSION_COOKIE_BASE,
+    SESSION_TTL_SECONDS,
 } from "../lib/session-token";
 import { nowSec } from "../lib/time";
-import { SESSION_TTL_SECONDS } from "../routes/auth";
 
 export function requireUserId(request: { user_id?: string }): string {
     const id = request.user_id;

@@ -11,12 +11,12 @@ import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { uuidv7 } from "uuidv7";
 import { db } from "../db";
 import { chunkSets, fileChunks, items, restoreSessions, uploadSessions, users } from "../db/schema";
-import { authenticatedLimitEnv, ipRateLimit, userRateLimitPreHandler } from "../lib/rate-limit";
+import { authenticatedRouteOptions, ipRateLimit } from "../lib/rate-limit";
 import { nowSec } from "../lib/time";
 import { parseBody } from "../lib/validate";
 import { requireUserId } from "../plugins/auth";
 import { S3_BUCKET, s3 } from "../s3";
-import { updateQuotaTx } from "../services/quota-service";
+import { QuotaExceededError, updateQuotaTx } from "../services/quota-service";
 import {
     deleteS3Prefix,
     listUploadChunkObjects,
@@ -74,9 +74,12 @@ const fileRoutes: FastifyPluginAsync = async (fastify) => {
         (_req, body, done) => done(null, body),
     );
 
-    const rlEnv = authenticatedLimitEnv();
-    const userMutRl = userRateLimitPreHandler(fastify, rlEnv.mutUserMax, rlEnv.mutWindow);
-    const userReadRl = userRateLimitPreHandler(fastify, rlEnv.readUserMax, rlEnv.readWindow);
+    const {
+        mut: authMut,
+        userMutRl,
+        userReadRl,
+        limits: rlEnv,
+    } = authenticatedRouteOptions(fastify);
     const authOpenRl = {
         preParsing: [fastify.authenticateBeforeBody],
         preHandler: [userMutRl],
@@ -90,11 +93,6 @@ const fileRoutes: FastifyPluginAsync = async (fastify) => {
         preParsing: [fastify.authenticateBeforeBody],
         preHandler: [userMutRl],
         config: { rateLimit: ipRateLimit(uploadChunkRlMax, uploadRlWindow) },
-    };
-    const authMut = {
-        preParsing: [fastify.authenticateBeforeBody],
-        preHandler: [userMutRl],
-        config: { rateLimit: ipRateLimit(rlEnv.mutIpMax, rlEnv.mutWindow) },
     };
 
     // POST /uploads — opens a session
@@ -196,7 +194,7 @@ const fileRoutes: FastifyPluginAsync = async (fastify) => {
                 });
             });
         } catch (e: any) {
-            if (e.name === "QuotaExceededError") {
+            if (e instanceof QuotaExceededError) {
                 const [user] = await db
                     .select({ used: users.storage_used, quota: users.storage_quota })
                     .from(users)

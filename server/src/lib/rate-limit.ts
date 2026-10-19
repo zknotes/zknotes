@@ -190,3 +190,34 @@ export function userRateLimitPreHandler(
     byKey.set(cacheKey, handler);
     return handler;
 }
+
+/** The window of the unauthenticated auth routes' IP limits — read by `auth.ts` and `vault.ts`. */
+export function authRateLimitWindow(): string {
+    return process.env.AUTH_RATELIMIT_WINDOW ?? "15 minutes";
+}
+
+/**
+ * The route options every authenticated route uses: authentication before the body is parsed, a
+ * per-user limit and a per-IP limit, in a read and a mutation flavour. Six route modules used to
+ * build these objects themselves from `authenticatedLimitEnv()`.
+ */
+export function authenticatedRouteOptions(fastify: FastifyInstance) {
+    const limits = authenticatedLimitEnv();
+    const userMutRl = userRateLimitPreHandler(fastify, limits.mutUserMax, limits.mutWindow);
+    const userReadRl = userRateLimitPreHandler(fastify, limits.readUserMax, limits.readWindow);
+    return {
+        limits,
+        userMutRl,
+        userReadRl,
+        read: {
+            preParsing: [fastify.authenticateBeforeBody],
+            preHandler: [userReadRl],
+            config: { rateLimit: ipRateLimit(limits.readIpMax, limits.readWindow) },
+        },
+        mut: {
+            preParsing: [fastify.authenticateBeforeBody],
+            preHandler: [userMutRl],
+            config: { rateLimit: ipRateLimit(limits.mutIpMax, limits.mutWindow) },
+        },
+    };
+}

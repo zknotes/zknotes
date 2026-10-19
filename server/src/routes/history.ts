@@ -5,30 +5,18 @@ import { uuidv7 } from "uuidv7";
 import { db } from "../db";
 import { itemHistory } from "../db/schema";
 import { parsePositiveIntParam } from "../lib/params";
-import { authenticatedLimitEnv, ipRateLimit, userRateLimitPreHandler } from "../lib/rate-limit";
+import { authenticatedRouteOptions } from "../lib/rate-limit";
 import { nowSec, parseTimestampParam } from "../lib/time";
 import { validationErrorPayload } from "../lib/validate";
 import { snapshotToWire, wireBlobsToRow } from "../lib/wire";
 import { requireUserId } from "../plugins/auth";
 import { getNumberedSnapshot, listNumberedSnapshots, thinOut } from "../services/history-service";
 import { getOwnedItem, userOwnsLiveItem } from "../services/item-service";
-import { getItemStorageSize, updateQuotaTx } from "../services/quota-service";
+import { getItemStorageSize, QuotaExceededError, updateQuotaTx } from "../services/quota-service";
 
 const historyRoutes: FastifyPluginAsync = async (fastify) => {
     // History (POST thinOut in particular) has to carry an IP rate limit.
-    const limits = authenticatedLimitEnv();
-    const userMutRl = userRateLimitPreHandler(fastify, limits.mutUserMax, limits.mutWindow);
-    const userReadRl = userRateLimitPreHandler(fastify, limits.readUserMax, limits.readWindow);
-    const authMut = {
-        preParsing: [fastify.authenticateBeforeBody],
-        preHandler: [userMutRl],
-        config: { rateLimit: ipRateLimit(limits.mutIpMax, limits.mutWindow) },
-    };
-    const authRead = {
-        preParsing: [fastify.authenticateBeforeBody],
-        preHandler: [userReadRl],
-        config: { rateLimit: ipRateLimit(limits.readIpMax, limits.readWindow) },
-    };
+    const { read: authRead, mut: authMut } = authenticatedRouteOptions(fastify);
 
     // GET /items/:id/history — the list of a note's snapshots
     fastify.get("/items/:id/history", authRead, async (request, reply) => {
@@ -92,7 +80,7 @@ const historyRoutes: FastifyPluginAsync = async (fastify) => {
         let insertedResult = null;
         try {
             insertedResult = await db.transaction(async (tx) => {
-                const insertSize = getItemStorageSize(blobs as any);
+                const insertSize = getItemStorageSize(blobs);
 
                 const [inserted] = await tx
                     .insert(itemHistory)
@@ -120,7 +108,7 @@ const historyRoutes: FastifyPluginAsync = async (fastify) => {
             });
         } catch (e: unknown) {
             const err = e as Error;
-            if (err.name === "QuotaExceededError") {
+            if (err instanceof QuotaExceededError) {
                 return reply.status(413).send({ error: "quota_exceeded" }); // hard_limit_exceeded fallback
             }
             if (err.message === "Insert failed") {

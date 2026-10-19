@@ -14,6 +14,7 @@ import {
     getItemStorageSize,
     maxFileCount,
     type QuotaAccumulator,
+    QuotaExceededError,
     updateQuotaTx,
 } from "./quota-service";
 
@@ -78,7 +79,7 @@ export async function releaseChunkSetIfUnreferenced(
             inTrash = item?.deleted_at != null;
         }
         await updateQuotaTx(
-            tx as any,
+            tx,
             userId,
             inTrash ? { trash: -Number(cs.total_size) } : { files: -Number(cs.total_size) },
             false,
@@ -121,26 +122,56 @@ export async function hasOtherLiveChunkSetRef(
     return !!row;
 }
 
+/** Only a file item may carry a chunk set; an item without one binds nothing. */
+export function fileSetBindable(type: string, chunkSetId: string | null | undefined): boolean {
+    return !chunkSetId || type === "file";
+}
+
+export type BindFileSetOutcome =
+    | { ok: true; reclaimedBytes: number }
+    | { ok: false; status: 409 | 413; error: string };
+
 /**
- * A file item may reference a committed, user-owned chunk set.
- * If the set is pending_delete (its original was purged) but the blob still exists, a conflict
- * copy may "bring the set back" — reclaim, then re-check. The caller's create path has to re-charge
- * the files quota when the reclaim returns true (see createItemTx).
+ * Binds a chunk set to a file item: a committed, user-owned set is simply accepted. A set in
+ * `pending_delete` (its original was purged, the blob still exists — a conflict copy shares it) is
+ * brought back AND its bytes are charged to the files bucket again, because `releaseChunkSetIfUnreferenced`
+ * freed them when the original went. Create and both update paths call this; the update paths used to
+ * reclaim through a predicate with a side effect and never re-charged, leaving an undercount until the
+ * weekly deep repair. On the hard limit the pending mark is restored so no live set is left without an item.
  */
-export async function fileSetInvalid(
-    type: string,
-    chunkSetId: string | null | undefined,
+export async function bindFileSet(
+    exec: DbExecutor,
     userId: string,
-    tx?: DbExecutor,
-): Promise<boolean> {
-    if (!chunkSetId) return false;
-    if (type !== "file") return true;
-    const exec = tx ?? db;
-    if (await chunkSetCommitted(chunkSetId, userId, exec)) return false;
-    // Try to reclaim a pending_delete set (file conflict share).
+    chunkSetId: string,
+    opts?: { accumulator?: QuotaAccumulator },
+): Promise<BindFileSetOutcome> {
+    if (await chunkSetCommitted(chunkSetId, userId, exec)) return { ok: true, reclaimedBytes: 0 };
+
     const reclaimed = await reclaimChunkSetFromPendingDelete(chunkSetId, userId, exec);
-    if (!reclaimed) return true;
-    return !(await chunkSetCommitted(chunkSetId, userId, exec));
+    if (!reclaimed || !(await chunkSetCommitted(chunkSetId, userId, exec))) {
+        return { ok: false, status: 409, error: "Referenced chunk set is not committed" };
+    }
+
+    const [cs] = await exec
+        .select({ total_size: chunkSets.total_size })
+        .from(chunkSets)
+        .where(eq(chunkSets.id, chunkSetId))
+        .limit(1);
+    const bytes = Number(cs?.total_size ?? 0);
+    if (bytes > 0) {
+        try {
+            await updateQuotaTx(exec, userId, { files: bytes }, true, {
+                accumulator: opts?.accumulator,
+            });
+        } catch (e) {
+            if (e instanceof QuotaExceededError) {
+                await markPendingDelete(chunkSetId, userId, exec);
+                return { ok: false, status: 413, error: "hard_limit_exceeded" };
+            }
+            throw e;
+        }
+    }
+    return { ok: true, reclaimedBytes: bytes };
 }
 
 /**
@@ -179,7 +210,7 @@ export async function purgeItemTx(
 
     const histSize = Number(historyRows[0]?.ciphertext_size ?? 0);
     if (histSize > 0) {
-        await updateQuotaTx(tx as any, userId, { history: -histSize }, false, {
+        await updateQuotaTx(tx, userId, { history: -histSize }, false, {
             accumulator: opts?.accumulator,
         });
     }
@@ -200,7 +231,7 @@ export async function purgeItemTx(
     const payloadSize = getItemStorageSize(current);
     if (payloadSize > 0) {
         await updateQuotaTx(
-            tx as any,
+            tx,
             userId,
             current.deleted_at != null ? { trash: -payloadSize } : { items: -payloadSize },
             false,
@@ -429,7 +460,7 @@ export async function purgeOwnedItemsBatch(
 
     // 5. The quota: releases only, so one call with the summed deltas equals the per-step calls.
     await updateQuotaTx(
-        tx as any,
+        tx,
         userId,
         { history: dHistory, items: dItems, trash: dTrash, files: dFiles },
         false,
@@ -566,6 +597,21 @@ export type CreateOutcome =
     | { kind: "error"; status: 409 | 429 | 413; error: string };
 
 /**
+ * A precondition failure thrown from inside a transaction so it rolls back (the quota charge made a
+ * step earlier must not survive a refused insert). Routes map it to its status. It replaces an
+ * `Error("CREATE_ERROR:" + JSON)` whose message the route parsed back.
+ */
+export class ItemRejected extends Error {
+    constructor(
+        readonly status: 409 | 413 | 429,
+        readonly error: string,
+    ) {
+        super(error);
+        this.name = "ItemRejected";
+    }
+}
+
+/**
  * One create path with its preconditions — shared by `POST /items` and `POST /items/batch` (the
  * create branch): the chunk-set committed guard → the file-count quota → the insert. Cycle
  * detection stays with the caller (POST does it inline, the batch as a pre-flight) because it
@@ -577,43 +623,14 @@ export async function createItemTx(
     data: NewItemData,
     opts?: { knownFileCount?: number; accumulator?: QuotaAccumulator },
 ): Promise<CreateOutcome> {
-    // The reclaim has to come before the invalid check and the quota — fileSetInvalid clears pending internally.
-    const wasPending =
-        data.type === "file" &&
-        !!data.chunk_set_id &&
-        !(await chunkSetCommitted(data.chunk_set_id, userId, executor));
-
-    if (await fileSetInvalid(data.type, data.chunk_set_id, userId, executor)) {
+    if (!fileSetBindable(data.type, data.chunk_set_id)) {
         return { kind: "error", status: 409, error: "Referenced chunk set is not committed" };
     }
-
-    // releaseChunkSetIfUnreferenced freed the files/trash quota when the original was purged.
-    // A new live ref has to put the bytes back into the files bucket (otherwise an undercount, and
-    // GC thinks the set is free).
-    if (wasPending && data.type === "file" && data.chunk_set_id) {
-        const [cs] = await executor
-            .select({ total_size: chunkSets.total_size })
-            .from(chunkSets)
-            .where(eq(chunkSets.id, data.chunk_set_id))
-            .limit(1);
-        if (cs?.total_size) {
-            try {
-                await updateQuotaTx(
-                    executor as any,
-                    userId,
-                    { files: Number(cs.total_size) },
-                    true,
-                    { accumulator: opts?.accumulator },
-                );
-            } catch (e: any) {
-                if (e?.name === "QuotaExceededError") {
-                    // Restore the pending mark so no "live" set is left without an item, surviving the hard limit.
-                    await markPendingDelete(data.chunk_set_id, userId, executor);
-                    return { kind: "error", status: 413, error: "hard_limit_exceeded" };
-                }
-                throw e;
-            }
-        }
+    if (data.type === "file" && data.chunk_set_id) {
+        const bound = await bindFileSet(executor, userId, data.chunk_set_id, {
+            accumulator: opts?.accumulator,
+        });
+        if (!bound.ok) return { kind: "error", status: bound.status, error: bound.error };
     }
 
     if (
