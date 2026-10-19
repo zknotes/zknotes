@@ -5,6 +5,7 @@
 // It lives in routes rather than core/ui because it reads the upload state from modules/files — core
 // must not import modules. upload-manager (which is TipTap-heavy) is imported dynamically on the first
 // open, so it does not enter the shell bundle.
+import { runWithToast } from "$lib/core/stores/toast.svelte";
 import { File as FileIcon, FileText, Folder, RefreshCw, Upload, X } from "lucide-svelte";
 import { fade, fly } from "svelte/transition";
 import Button from "$lib/core/ui/Button.svelte";
@@ -34,9 +35,9 @@ let tick = $state(0);
 
 $effect(() => {
     if (open && !mgr) {
-        import("$lib/modules/files/upload-manager").then((m) => {
-            mgr = m;
-        });
+        void runWithToast(async () => {
+            mgr = await import("$lib/modules/files/upload-manager");
+        }, "The upload tracker could not be loaded");
     }
 });
 

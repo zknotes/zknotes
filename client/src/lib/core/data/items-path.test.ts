@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { folderPathSegments } from "./items";
+import { folderPathLabel, folderPathSegments } from "./items";
 
 // Saas spec 156 (package G): "where an item lives" — root first, a missing ancestor marked, cycles end.
 describe("folderPathSegments", () => {
@@ -30,5 +30,18 @@ describe("folderPathSegments", () => {
             ["q", { title: "Q", parent_id: "p" }],
         ]);
         expect(folderPathSegments("p", loop).map((s) => s.id)).toEqual(["q", "p"]);
+    });
+});
+
+describe("folderPathLabel", () => {
+    const byId = new Map([
+        ["a", { title: "A", parent_id: null }],
+        ["b", { title: "B", parent_id: "a" }],
+    ]);
+    it("joins the segments, or names the root", () => {
+        expect(folderPathLabel(null, byId)).toBe("Home");
+        expect(folderPathLabel(null, byId, "Root")).toBe("Root");
+        expect(folderPathLabel("b", byId)).toBe("A / B");
+        expect(folderPathLabel("ghost", byId)).toBe("Unknown");
     });
 });

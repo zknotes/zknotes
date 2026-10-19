@@ -18,7 +18,7 @@ import {
     X,
 } from "lucide-svelte";
 import { treeItemsQueryOptions } from "$lib/core/data/item-queries";
-import { type DecryptedItemMeta, folderPathSegments } from "$lib/core/data/items";
+import { type DecryptedItemMeta, folderPathLabel } from "$lib/core/data/items";
 import Button from "$lib/core/ui/Button.svelte";
 import Dialog from "$lib/core/ui/Dialog.svelte";
 import DialogActions from "$lib/core/ui/DialogActions.svelte";
@@ -45,11 +45,7 @@ let folderPath = $derived.by(() => {
     if (!file.parent_id) return "Unlinked";
     const map = new Map<string, { title: string; parent_id: string | null }>();
     for (const i of treeQuery.data ?? []) map.set(i.id, { title: i.title, parent_id: i.parent_id });
-    return (
-        folderPathSegments(file.parent_id, map)
-            .map((s) => s.title)
-            .join(" / ") || "Home"
-    );
+    return folderPathLabel(file.parent_id, map);
 });
 
 let pickingNote = $state(false);

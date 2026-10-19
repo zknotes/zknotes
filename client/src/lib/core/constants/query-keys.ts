@@ -6,4 +6,6 @@ export const QUERY_KEYS = {
     deletedItems: ["deleted-items"] as const,
     /** A single note (the decrypted payload). */
     note: (id: string) => ["note", id] as const,
+    /** The user's share links (listShares). */
+    shares: ["shares"] as const,
 };

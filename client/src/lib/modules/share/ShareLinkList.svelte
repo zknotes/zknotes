@@ -1,4 +1,5 @@
 <script lang="ts">
+import { QUERY_KEYS } from "$lib/core/constants/query-keys";
 import { createQuery, useQueryClient } from "@tanstack/svelte-query";
 import { onMount } from "svelte";
 import { Link2, Trash2 } from "lucide-svelte";
@@ -7,13 +8,13 @@ import { getDeletedItems, getTreeItems } from "$lib/core/data/items";
 import { globalToasts } from "$lib/core/stores/toast.svelte";
 import type { ShareListEntry } from "$lib/core/api/shares";
 import { formatDate } from "$lib/core/utils/format";
-import { listShares, revokeShare } from "./share-service";
+import { listShares, revokeShare, type ShareStatus, shareStatus } from "./share-service";
 import { SECOND_MS } from "$lib/core/utils/duration";
 
 const queryClient = useQueryClient();
 
 const sharesQuery = createQuery(() => ({
-    queryKey: ["shares"],
+    queryKey: QUERY_KEYS.shares,
     queryFn: listShares,
     staleTime: 30 * SECOND_MS,
 }));
@@ -29,12 +30,12 @@ onMount(async () => {
     titleById = map;
 });
 
-function statusLabel(row: ShareListEntry): string {
-    if (row.source_deleted) return "Source deleted";
-    if (row.revoked_at) return "Revoked";
-    if (row.expires_at && row.expires_at * 1000 < Date.now()) return "Expired";
-    return "Active";
-}
+const STATUS_LABEL: Record<ShareStatus, string> = {
+    active: "Active",
+    expired: "Expired",
+    revoked: "Revoked",
+    source_deleted: "Source deleted",
+};
 
 function resolveNoteLabel(row: ShareListEntry): { text: string; fallback: boolean } {
     const title = titleById.get(row.source_item_id);
@@ -46,7 +47,7 @@ function resolveNoteLabel(row: ShareListEntry): { text: string; fallback: boolea
 async function handleRevoke(id: string) {
     try {
         await revokeShare(id);
-        await queryClient.invalidateQueries({ queryKey: ["shares"] });
+        await queryClient.invalidateQueries({ queryKey: QUERY_KEYS.shares });
         globalToasts.add({ message: "Link revoked", variant: "success" });
     } catch (e) {
         globalToasts.add({
@@ -84,6 +85,7 @@ function formatTs(sec: number | null): string {
                 <tbody>
                     {#each sharesQuery.data as row}
                         {@const noteLabel = resolveNoteLabel(row)}
+                        {@const status = shareStatus(row)}
                         <tr class="border-t border-[var(--stroke)]">
                             <td class="px-4 py-2.5 text-left min-w-[12rem] max-w-[20rem] truncate {noteLabel.fallback ? 'text-[var(--text-muted)] italic' : ''}">
                                 {noteLabel.text}
@@ -92,9 +94,9 @@ function formatTs(sec: number | null): string {
                             <td class="px-4 py-2.5 text-left whitespace-nowrap">{formatTs(row.expires_at)}</td>
                             <td class="px-4 py-2.5 text-left">{row.view_count}{row.max_views === 1 ? " (one-time)" : ""}</td>
                             <td class="px-4 py-2.5 text-left">{row.attachment_count > 0 ? row.attachment_count : "—"}</td>
-                            <td class="px-4 py-2.5 text-left">{statusLabel(row)}</td>
+                            <td class="px-4 py-2.5 text-left">{STATUS_LABEL[status]}</td>
                             <td class="px-4 py-2.5 text-left">
-                                {#if !row.revoked_at && statusLabel(row) === "Active"}
+                                {#if status === "active"}
                                     <Button
                                         variant="ghost"
                                         size="sm"

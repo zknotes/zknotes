@@ -21,10 +21,11 @@ import { type BackupSink, createBackupSink, ZipStreamWriter } from "./sink";
 import {
     buildItemPath,
     ExportRun,
-    type ExportResult,
     loadLiveItems,
-    type PathMeta,
     safeName,
+    type ExportResult,
+    type PathMeta,
+    uniquePath,
 } from "./utils";
 
 export interface MarkdownExportProgress {
@@ -117,11 +118,7 @@ export async function exportMarkdown(options: MarkdownExportOptions = {}): Promi
 
                 const folder = buildItemPath(item.id, metaById);
                 const base = folder ? `${folder}/${safeName(title)}` : safeName(title);
-                // Two notes of the same name in one folder would otherwise be two entries of one
-                // name, and an unzip keeps only one of them.
-                let path = `${base}.md`;
-                for (let n = 2; usedPaths.has(path); n++) path = `${base} (${n}).md`;
-                usedPaths.add(path);
+                const path = uniquePath(base, ".md", usedPaths);
 
                 notes.push({
                     title,

@@ -1,4 +1,5 @@
 <script lang="ts">
+import type { StorageInfo } from "$lib/core/api/files";
 import { onMount } from "svelte";
 import {
     CircleHelp,
@@ -65,21 +66,7 @@ function setAutoDownloadPolicy(policy: AutoDownloadPolicy) {
     setSyncSettings({ autoDownload: policy });
 }
 
-let cloudStorage = $state<
-    | {
-          breakdown: {
-              files_bytes: number;
-              items_bytes: number;
-              history_bytes: number;
-              trashed_bytes: number;
-              total_used: number;
-          };
-          storage_quota: number;
-          max_file_size: number;
-      }
-    | "loading"
-    | "error"
->("loading");
+let cloudStorage = $state<StorageInfo | "loading" | "error">("loading");
 
 async function loadStorageInfo() {
     const { getLocalChunkBytes } = await import("$lib/core/db/file-chunks");
@@ -95,6 +82,9 @@ async function loadStorageInfo() {
     }
 }
 
+let clearMessageTimer: ReturnType<typeof setTimeout> | undefined;
+$effect(() => () => clearTimeout(clearMessageTimer));
+
 async function handleClearStorage() {
     if (isClearingStorage) return;
     isClearingStorage = true;
@@ -108,7 +98,8 @@ async function handleClearStorage() {
         clearStorageMessage = e instanceof Error ? e.message : "Error clearing storage.";
     } finally {
         isClearingStorage = false;
-        setTimeout(() => {
+        clearTimeout(clearMessageTimer);
+        clearMessageTimer = setTimeout(() => {
             if (!isClearingStorage) clearStorageMessage = "";
         }, 5000);
     }

@@ -23,6 +23,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ### Fixed
 
+- Restoring from the trash, removing a star, deleting from the breadcrumb menu and a few other
+  actions now show a message when they fail, instead of failing silently.
 - Settings that live only in this browser (date and time format, the outline panel, pinned
   folders) no longer fail with an error when the browser blocks local storage (a private window,
   a locked-down profile): the setting still applies for the session, it is simply not remembered.

@@ -1,10 +1,11 @@
 <script lang="ts">
+import { runWithToast } from "$lib/core/stores/toast.svelte";
 import { createQuery, useQueryClient } from "@tanstack/svelte-query";
 import { CornerDownRight, FileText, Home, Shield, Star } from "lucide-svelte";
 import { goto } from "$app/navigation";
 import { QUERY_KEYS } from "$lib/core/constants/query-keys";
 import { treeItemsQueryOptions } from "$lib/core/data/item-queries";
-import { folderPathSegments } from "$lib/core/data/items";
+import { folderPathLabel } from "$lib/core/data/items";
 import { ItemService } from "$lib/core/services/item-service";
 import Button from "$lib/core/ui/Button.svelte";
 import { CollectionEmptyState, PageHeader, UtilityCloseButton } from "$lib/core/ui";
@@ -31,15 +32,13 @@ let starredNotes = $derived(
         .sort((a, b) => b.updated_at - a.updated_at),
 );
 
-function locationLabel(parentId: string | null): string {
-    const segments = folderPathSegments(parentId, itemMap);
-    if (segments.length === 0) return "Home";
-    return segments.map((s) => s.title).join(" / ");
-}
+const locationLabel = (parentId: string | null) => folderPathLabel(parentId, itemMap);
 
 async function unstar(id: string) {
-    await ItemService.updateItemStarred(id, false);
-    await queryClient.invalidateQueries({ queryKey: QUERY_KEYS.treeItems });
+    await runWithToast(async () => {
+        await ItemService.updateItemStarred(id, false);
+        await queryClient.invalidateQueries({ queryKey: QUERY_KEYS.treeItems });
+    }, "Could not remove the star");
 }
 </script>
 

@@ -1,6 +1,11 @@
 // The download and preview pipeline: fetch each ciphertext chunk, decrypt it in the worker (the AAD
 // binds chunkSetId plus the position), assemble the plaintext and wrap it in a Blob whose type is
 // chosen by SNIFFING the bytes — never from the declared MIME.
+import {
+    type ByteSink,
+    openFilePickerSink,
+    triggerAnchorDownload,
+} from "$lib/core/utils/download-sink";
 import type { FilePayload } from "@zknotes/shared";
 import { getDB } from "$lib/core/db";
 import { loadChunk } from "$lib/core/files/chunk-loader";
@@ -224,61 +229,11 @@ export class DownloadCancelledError extends Error {
 const MEMORY_DOWNLOAD_MAX_BYTES =
     (Number(import.meta.env.VITE_FILE_MEMORY_DOWNLOAD_MAX_MB) || 100) * 1024 * 1024;
 
-interface DownloadSink {
-    write(bytes: Uint8Array): Promise<void>;
-    close(): Promise<void>;
-    abort(reason?: unknown): Promise<void>;
-}
-
-interface FsWritableLike {
-    write(data: Uint8Array): Promise<void>;
-    close(): Promise<void>;
-    abort?(reason?: unknown): Promise<void>;
-}
-interface FsFileHandleLike {
-    createWritable(): Promise<FsWritableLike>;
-    getFile(): Promise<File>;
-}
-interface FsSavePicker {
-    showSaveFilePicker?: (opts: {
-        suggestedName?: string;
-        types?: Array<{ description?: string; accept: Record<string, string[]> }>;
-    }) => Promise<FsFileHandleLike>;
-}
-
-function triggerAnchorDownload(url: string, filename: string): void {
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-}
+type DownloadSink = ByteSink;
 
 /** The File System Access "Save as" — it streams chunk by chunk to disk (Chrome/Edge). */
-async function tryFilePickerSink(filename: string): Promise<DownloadSink | null> {
-    if (typeof window === "undefined") return null;
-    const picker = window as unknown as FsSavePicker;
-    if (typeof picker.showSaveFilePicker !== "function") return null;
-    let handle: FsFileHandleLike;
-    try {
-        handle = await picker.showSaveFilePicker({
-            suggestedName: filename,
-        });
-    } catch (e) {
-        if (e instanceof DOMException && e.name === "AbortError") {
-            throw new DownloadCancelledError();
-        }
-        // A SecurityError (not from a user gesture, say) → fall through quietly.
-        return null;
-    }
-    const writable = await handle.createWritable();
-    return {
-        write: (bytes) => writable.write(bytes),
-        close: () => writable.close(),
-        abort: (reason) => writable.abort?.(reason) ?? Promise.resolve(),
-    };
-}
+const tryFilePickerSink = (filename: string) =>
+    openFilePickerSink(filename, { onAbort: () => new DownloadCancelledError() });
 
 const OPFS_DOWNLOADS_DIR = "downloads";
 

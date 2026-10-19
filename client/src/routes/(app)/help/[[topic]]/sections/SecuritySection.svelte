@@ -1,4 +1,5 @@
 <script lang="ts">
+import { runWithToast } from "$lib/core/stores/toast.svelte";
 import { Info, Shield } from "lucide-svelte";
 import Button from "$lib/core/ui/Button.svelte";
 import { fetchKdfParams } from "$lib/core/services/auth-service";
@@ -6,7 +7,9 @@ import { fetchKdfParams } from "$lib/core/services/auth-service";
 let kdfInfo = $state<{ m: number; t: number; p: number } | null>(null);
 
 async function loadKdfInfo() {
-    kdfInfo = await fetchKdfParams();
+    await runWithToast(async () => {
+        kdfInfo = await fetchKdfParams();
+    }, "Could not load the key-derivation parameters");
 }
 </script>
 

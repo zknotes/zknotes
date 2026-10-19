@@ -1,4 +1,5 @@
 <script lang="ts">
+import type { StorageInfo } from "$lib/core/api/files";
 import { createQuery, useQueryClient } from "@tanstack/svelte-query";
 import { ChevronDown, FileImage, FolderClosed, Loader2, RefreshCw, Trash2, X } from "lucide-svelte";
 import { onMount } from "svelte";
@@ -149,21 +150,7 @@ $effect(() => {
 // `?view=grid` — marketing shots / a deep link; the default stays list.
 let mode = $state<"grid" | "list">(page.url.searchParams.get("view") === "grid" ? "grid" : "list");
 
-let storage = $state<
-    | {
-          breakdown: {
-              files_bytes: number;
-              items_bytes: number;
-              history_bytes: number;
-              trashed_bytes: number;
-              total_used: number;
-          };
-          storage_quota: number;
-          max_file_size: number;
-      }
-    | "loading"
-    | "error"
->("loading");
+let storage = $state<StorageInfo | "loading" | "error">("loading");
 let trashSize = $state(0);
 
 async function refreshStorage() {

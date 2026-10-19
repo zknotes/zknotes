@@ -32,3 +32,19 @@ class ToastStore {
 }
 
 export const globalToasts = new ToastStore();
+
+/**
+ * Runs an async UI action; a failure becomes an error toast (and a console line for the developer)
+ * instead of an unhandled rejection that leaves the user with nothing.
+ */
+export async function runWithToast(
+    action: () => Promise<unknown>,
+    failMessage: string,
+): Promise<void> {
+    try {
+        await action();
+    } catch (e) {
+        console.error(failMessage, e);
+        globalToasts.add({ variant: "error", message: failMessage });
+    }
+}

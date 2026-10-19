@@ -1,4 +1,5 @@
 <script lang="ts">
+import type { StorageInfo } from "$lib/core/api/files";
 import { createQuery, useQueryClient } from "@tanstack/svelte-query";
 import {
     ChevronDown,
@@ -45,7 +46,7 @@ import { FileService } from "$lib/modules/files/file-service";
 import { ItemService } from "$lib/core/services/item-service";
 import { activeSidebarId } from "$lib/core/stores/active-sidebar-id.svelte";
 import { pendingExpandId } from "$lib/core/stores/pending-expand.svelte";
-import { globalToasts } from "$lib/core/stores/toast.svelte";
+import { globalToasts, runWithToast } from "$lib/core/stores/toast.svelte";
 import { expandedFolders } from "$lib/core/utils/expanded-folders";
 const queryClient = useQueryClient();
 
@@ -68,20 +69,7 @@ let confirmDialog = $state<
 >(null);
 let deleting = $state(false);
 
-let storage = $state<
-    | {
-          breakdown: {
-              files_bytes: number;
-              items_bytes: number;
-              history_bytes: number;
-              trashed_bytes: number;
-              total_used: number;
-          };
-          storage_quota: number;
-      }
-    | "loading"
-    | "error"
->("loading");
+let storage = $state<StorageInfo | "loading" | "error">("loading");
 let trashSize = $state(0);
 
 async function refreshTrashSize() {
@@ -206,6 +194,10 @@ async function invalidate() {
 }
 
 async function restoreItem(item: DeletedItemMeta) {
+    await runWithToast(() => restoreItemNow(item), `Could not restore "${item.title}"`);
+}
+
+async function restoreItemNow(item: DeletedItemMeta) {
     const loc = locationOf(item);
     const label = locationLabel(loc);
 
@@ -236,13 +228,15 @@ async function restoreItem(item: DeletedItemMeta) {
 }
 
 async function restoreBatchFile(file: DeletedItemMeta, note: DeletedItemMeta) {
-    await ItemService.restoreItem(file.id);
-    await invalidate();
-    globalToasts.add({
-        variant: "success",
-        message: `Restored file + parent note "${note.title}".`,
-        action: { label: "View", onClick: () => goto(`/note/${note.id}`) },
-    });
+    await runWithToast(async () => {
+        await ItemService.restoreItem(file.id);
+        await invalidate();
+        globalToasts.add({
+            variant: "success",
+            message: `Restored file + parent note "${note.title}".`,
+            action: { label: "View", onClick: () => goto(`/note/${note.id}`) },
+        });
+    }, `Could not restore "${file.title}"`);
 }
 
 function requestPermanentDelete(item: DeletedItemMeta) {
@@ -273,14 +267,16 @@ async function performPermanentDelete(id: string) {
 
 async function bulkRestore() {
     const ids = [...selectedIds];
-    for (const id of ids) {
-        const item = allDeleted.find((i) => i.id === id);
-        if (!item) continue;
-        if (item.type === "file") await FileService.restore(id);
-        else await ItemService.restoreItem(id);
-    }
-    await invalidate();
-    selectedIds = new Set();
+    await runWithToast(async () => {
+        for (const id of ids) {
+            const item = allDeleted.find((i) => i.id === id);
+            if (!item) continue;
+            if (item.type === "file") await FileService.restore(id);
+            else await ItemService.restoreItem(id);
+        }
+        await invalidate();
+        selectedIds = new Set();
+    }, "Could not restore the selected items");
 }
 
 async function performBulkDeleteForever(ids: string[]) {
@@ -313,6 +309,12 @@ async function confirmDestructiveAction() {
         if (action.kind === "one") await performPermanentDelete(action.item.id);
         else if (action.kind === "bulk") await performBulkDeleteForever(action.ids);
         else await performEmptyTrash();
+    } catch (e) {
+        console.error("Permanent delete failed", e);
+        globalToasts.add({
+            variant: "error",
+            message: "Could not delete forever — nothing was removed",
+        });
     } finally {
         deleting = false;
     }

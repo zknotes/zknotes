@@ -189,6 +189,9 @@ async function clearAll() {
     }
 }
 
+let manualSavedTimer: ReturnType<typeof setTimeout> | undefined;
+$effect(() => () => clearTimeout(manualSavedTimer));
+
 async function saveManualSnapshot() {
     savingManual = true;
     manualSaved = false;
@@ -196,7 +199,8 @@ async function saveManualSnapshot() {
         await maybeCreateSnapshot(noteId);
         await loadSnapshots();
         manualSaved = true;
-        setTimeout(() => (manualSaved = false), 2000);
+        clearTimeout(manualSavedTimer);
+        manualSavedTimer = setTimeout(() => (manualSaved = false), 2000);
     } catch {
         // not fatal
     } finally {

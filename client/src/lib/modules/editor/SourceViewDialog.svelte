@@ -17,6 +17,7 @@ let preEl = $state<HTMLPreElement | undefined>(undefined);
 let copyState = $state<"idle" | "copied" | "error">("idle");
 let copyError = $state("");
 let copyResetTimer: ReturnType<typeof setTimeout> | undefined;
+$effect(() => () => clearTimeout(copyResetTimer));
 
 $effect(() => {
     const el = preEl;

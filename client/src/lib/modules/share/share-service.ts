@@ -23,11 +23,21 @@ export function shareTtlOptions(maxSec: number) {
     return TTL_OPTIONS.filter((o) => o.sec <= maxSec);
 }
 
+export type ShareStatus = "active" | "expired" | "revoked" | "source_deleted";
+
+/**
+ * One reading of a link's state, in one order of precedence: a deleted source trumps a revoke,
+ * which trumps an expiry. The list used to rank them one way and the "is active" check another.
+ */
+export function shareStatus(row: ShareListEntry, nowMs: number = Date.now()): ShareStatus {
+    if (row.source_deleted) return "source_deleted";
+    if (row.revoked_at) return "revoked";
+    if (row.expires_at != null && row.expires_at * 1000 < nowMs) return "expired";
+    return "active";
+}
+
 export function isShareListEntryActive(row: ShareListEntry): boolean {
-    if (row.revoked_at) return false;
-    if (row.source_deleted) return false;
-    if (row.expires_at != null && row.expires_at * 1000 < Date.now()) return false;
-    return true;
+    return shareStatus(row) === "active";
 }
 
 export async function getActiveShareForNote(noteId: string): Promise<ShareListEntry | null> {

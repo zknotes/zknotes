@@ -1,4 +1,5 @@
 <script lang="ts">
+import { runWithToast } from "$lib/core/stores/toast.svelte";
 import {
     CloudOff,
     FileCode,
@@ -178,9 +179,11 @@ async function handleDelete(itemId: string | null) {
     if (!itemId) return;
     showMenuCrumbId = null;
 
-    await ItemService.deleteItem(itemId);
-    await queryClient.invalidateQueries({ queryKey: QUERY_KEYS.treeItems });
-    goto("/", { keepFocus: true });
+    await runWithToast(async () => {
+        await ItemService.deleteItem(itemId);
+        await queryClient.invalidateQueries({ queryKey: QUERY_KEYS.treeItems });
+        await goto("/", { keepFocus: true });
+    }, "Could not move the item to trash");
 }
 
 let renamingItemId = $state<string | null>(null);

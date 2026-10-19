@@ -220,6 +220,13 @@ function focusEditorAtPointer(e: MouseEvent) {
 let attachRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 const ATTACH_REFRESH_MS = 150;
 
+// Neither timer may fire after the page is gone: the flash would write to unmounted state, the
+// attachment refresh would read a destroyed editor.
+$effect(() => () => {
+    clearTimeout(syncFlashTimer);
+    clearTimeout(attachRefreshTimer);
+});
+
 function refreshAttachments() {
     if (!editor || editor.isDestroyed) return;
     clearTimeout(attachRefreshTimer);

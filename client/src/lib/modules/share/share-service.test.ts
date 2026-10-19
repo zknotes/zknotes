@@ -7,7 +7,7 @@ vi.mock("$lib/core/api/shares", () => ({
 }));
 vi.mock("$lib/core/workers/crypto-rpc", () => ({ wrapItemKeyForShareTask: vi.fn() }));
 
-const { formatShareError, isShareListEntryActive, shareTtlOptions } = await import(
+const { formatShareError, isShareListEntryActive, shareStatus, shareTtlOptions } = await import(
     "./share-service"
 );
 import type { ShareListEntry } from "$lib/core/api/shares";
@@ -57,5 +57,19 @@ describe("formatShareError", () => {
         expect(formatShareError("too_many_shares")).toContain("maximum");
         expect(formatShareError("weird_code")).toBe("weird_code");
         expect(formatShareError("")).toBe("Failed to create link");
+    });
+});
+
+describe("shareStatus", () => {
+    it("ranks a deleted source over a revoke over an expiry", () => {
+        const now = 1_800_000_000_000;
+        expect(shareStatus(entry({}), now)).toBe("active");
+        expect(shareStatus(entry({ expires_at: 1_800_000_000 - 1 }), now)).toBe("expired");
+        expect(shareStatus(entry({ expires_at: 1_800_000_000 - 1, revoked_at: 5 }), now)).toBe(
+            "revoked",
+        );
+        expect(shareStatus(entry({ revoked_at: 5, source_deleted: true }), now)).toBe(
+            "source_deleted",
+        );
     });
 });

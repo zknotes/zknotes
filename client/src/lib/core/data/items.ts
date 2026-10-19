@@ -104,6 +104,16 @@ export function folderPathSegments(
     return segments;
 }
 
+/** The path as one line ("A / B"), or `root` when the item sits at the top level. */
+export function folderPathLabel(
+    parentId: string | null,
+    byId: Map<string, { title: string; parent_id: string | null; deleted?: boolean }>,
+    root = "Home",
+): string {
+    const segments = folderPathSegments(parentId, byId);
+    return segments.length === 0 ? root : segments.map((s) => s.title).join(" / ");
+}
+
 import { loadPersisted, rawStringSerde, STORAGE_KEYS } from "$lib/core/utils/persisted";
 
 interface DecryptedFields {

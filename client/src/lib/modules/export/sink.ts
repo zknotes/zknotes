@@ -5,6 +5,11 @@
 // where streaming is unavailable. ZipStreamWriter builds the ZIP incrementally (fflate's streaming Zip),
 // while encryptedSink passes the bytes through BackupEncryptor before writing.
 
+import {
+    type ByteSink,
+    openFilePickerSink,
+    triggerAnchorDownload,
+} from "$lib/core/utils/download-sink";
 import { Zip, ZipDeflate, ZipPassThrough } from "fflate";
 import type { BackupEncryptor } from "./backup-crypto";
 
@@ -17,65 +22,16 @@ export class BackupAbortedError extends Error {
 }
 
 /** An abstraction over a sink of bytes: either an FS Access writable stream or an in-memory blob. */
-export interface BackupSink {
-    write(bytes: Uint8Array): Promise<void>;
-    close(): Promise<void>;
-    abort(reason?: unknown): Promise<void>;
-}
-
-// ── File System Access API types (not in the standard TS lib) ───────────────
-interface FsWritableLike {
-    write(data: Uint8Array): Promise<void>;
-    close(): Promise<void>;
-    abort?(reason?: unknown): Promise<void>;
-}
-interface FsFileHandleLike {
-    createWritable(): Promise<FsWritableLike>;
-}
-interface FsSavePicker {
-    showSaveFilePicker?: (opts: {
-        suggestedName?: string;
-        types?: Array<{ description?: string; accept: Record<string, string[]> }>;
-    }) => Promise<FsFileHandleLike>;
-}
+export type BackupSink = ByteSink;
 
 function triggerBlobDownload(chunks: Uint8Array[], filename: string, mime: string): void {
     const url = URL.createObjectURL(new Blob(chunks as BlobPart[], { type: mime }));
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    triggerAnchorDownload(url, filename);
     setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-async function tryFilePickerSink(
-    filename: string,
-    accept: Record<string, string[]>,
-): Promise<BackupSink | null> {
-    const picker = window as unknown as FsSavePicker;
-    if (typeof picker.showSaveFilePicker !== "function") return null;
-
-    let handle: FsFileHandleLike;
-    try {
-        handle = await picker.showSaveFilePicker({
-            suggestedName: filename,
-            types: [{ accept }],
-        });
-    } catch (e) {
-        if (e instanceof DOMException && e.name === "AbortError") throw new BackupAbortedError();
-        // A SecurityError (not from a user gesture, say) → fall through quietly.
-        return null;
-    }
-
-    const writable = await handle.createWritable();
-    return {
-        write: (bytes) => writable.write(bytes),
-        close: () => writable.close(),
-        abort: (reason) => writable.abort?.(reason) ?? Promise.resolve(),
-    };
-}
+const tryFilePickerSink = (filename: string, accept: Record<string, string[]>) =>
+    openFilePickerSink(filename, { accept, onAbort: () => new BackupAbortedError() });
 
 function blobSink(filename: string, mime: string): BackupSink {
     const chunks: Uint8Array[] = [];

@@ -124,3 +124,15 @@ export class ExportRun<P extends ExportTick> {
         }
     }
 }
+
+/**
+ * A ZIP entry name nobody has used yet: `base + ext`, else `base (2) + ext`, `(3)`… Two notes of the
+ * same name in one folder would otherwise be two entries of one name, and an unzip keeps only one.
+ * Records the result in `used`.
+ */
+export function uniquePath(base: string, ext: string, used: Set<string>): string {
+    let path = `${base}${ext}`;
+    for (let n = 2; used.has(path); n++) path = `${base} (${n})${ext}`;
+    used.add(path);
+    return path;
+}

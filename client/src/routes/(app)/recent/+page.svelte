@@ -4,7 +4,7 @@ import { Clock, CornerDownRight, FileText, Home, Shield } from "lucide-svelte";
 import { onMount } from "svelte";
 import { goto } from "$app/navigation";
 import { treeItemsQueryOptions } from "$lib/core/data/item-queries";
-import { folderPathSegments } from "$lib/core/data/items";
+import { folderPathLabel } from "$lib/core/data/items";
 import { recentNotesStore } from "$lib/core/stores/recent-notes.svelte";
 import CollectionList from "$lib/core/ui/CollectionList.svelte";
 import CollectionListRow from "$lib/core/ui/CollectionListRow.svelte";
@@ -34,11 +34,7 @@ let recentNotes = $derived.by(() => {
         .filter((n): n is NonNullable<typeof n> => !!n && n.type === "note");
 });
 
-function locationLabel(parentId: string | null): string {
-    const segments = folderPathSegments(parentId, itemMap);
-    if (segments.length === 0) return "Home";
-    return segments.map((s) => s.title).join(" / ");
-}
+const locationLabel = (parentId: string | null) => folderPathLabel(parentId, itemMap);
 </script>
 
 <div class="relative flex-1 overflow-y-auto bg-[var(--surface-app)] fade-in">

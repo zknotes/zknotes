@@ -23,11 +23,12 @@ import { isRasterImageMime } from "$lib/modules/files/sniff";
 import { type BackupSink, createBackupSink, ZipStreamWriter } from "./sink";
 import {
     buildItemPath,
-    type ExportResult,
     ExportRun,
     loadLiveItems,
-    type PathMeta,
     safeName,
+    type ExportResult,
+    type PathMeta,
+    uniquePath,
 } from "./utils";
 
 export interface HtmlExportProgress {
@@ -452,15 +453,8 @@ export async function exportHtml(options: HtmlExportOptions = {}): Promise<Expor
 
                 const folder = buildItemPath(item.id, metaById);
                 const depth = folder ? folder.split("/").length : 0;
-                let path = folder ? `${folder}/${safeName(title)}.html` : `${safeName(title)}.html`;
-                // Deduplicate name collisions within the same folder (otherwise a silent overwrite).
-                if (usedPaths.has(path)) {
-                    let n = 2;
-                    const base = path.slice(0, -".html".length);
-                    while (usedPaths.has(`${base} (${n}).html`)) n++;
-                    path = `${base} (${n}).html`;
-                }
-                usedPaths.add(path);
+                const base = folder ? `${folder}/${safeName(title)}` : safeName(title);
+                const path = uniquePath(base, ".html", usedPaths);
 
                 notes.push({
                     id: item.id,

@@ -1,3 +1,4 @@
+import { triggerAnchorDownload } from "$lib/core/utils/download-sink";
 import type { FilePayload, KdfParams } from "@zknotes/shared";
 import { FILE_LIMITS, viewProofB64FromFragmentKey } from "@zknotes/shared";
 import type { ShareAttachmentWire } from "$lib/core/api/shares";
@@ -112,12 +113,8 @@ export function saveShareAttachmentFile(bytes: Uint8Array, name: string, mime: s
         bytes.byteOffset,
         bytes.byteOffset + bytes.byteLength,
     ) as ArrayBuffer;
-    const blob = new Blob([buf], { type: mime });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = name;
-    a.click();
+    const url = URL.createObjectURL(new Blob([buf], { type: mime }));
+    triggerAnchorDownload(url, name);
     // A synchronous revoke can cut the download short (Firefox/Safari) — delay it until the download has started.
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
