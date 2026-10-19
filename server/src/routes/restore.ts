@@ -1,3 +1,4 @@
+import { isUuid } from "../lib/params";
 import {
     createsCycle,
     RESTORE_LIMITS,
@@ -47,8 +48,6 @@ import {
 } from "../services/quota-service";
 import { releaseRestoreStaging } from "../services/restore-service";
 import { deleteS3Prefix } from "../services/storage-service";
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type ItemRow = typeof items.$inferSelect;
 type SessionRow = typeof restoreSessions.$inferSelect;
@@ -694,7 +693,7 @@ const restoreRoutes: FastifyPluginAsync = async (fastify) => {
     fastify.get("/restore/sessions/:id", authRead, async (request, reply) => {
         const userId = requireUserId(request);
         const { id } = request.params as { id: string };
-        if (!UUID_RE.test(id)) return reply.status(400).send({ error: "bad_restore_session_id" });
+        if (!isUuid(id)) return reply.status(400).send({ error: "bad_restore_session_id" });
 
         const session = await getOwnedSession(db, userId, id);
         if (!session) return reply.status(404).send({ error: "not_found" });
@@ -747,7 +746,7 @@ const restoreRoutes: FastifyPluginAsync = async (fastify) => {
     fastify.post("/restore/sessions/:id/items", authMut, async (request, reply) => {
         const userId = requireUserId(request);
         const { id } = request.params as { id: string };
-        if (!UUID_RE.test(id)) return reply.status(400).send({ error: "bad_restore_session_id" });
+        if (!isUuid(id)) return reply.status(400).send({ error: "bad_restore_session_id" });
         const data = parseBody(RestoreSessionItemsSchema, request, reply);
         if (!data) return;
 
@@ -849,7 +848,7 @@ const restoreRoutes: FastifyPluginAsync = async (fastify) => {
     fastify.post("/restore/sessions/:id/ping", authMut, async (request, reply) => {
         const userId = requireUserId(request);
         const { id } = request.params as { id: string };
-        if (!UUID_RE.test(id)) return reply.status(400).send({ error: "bad_restore_session_id" });
+        if (!isUuid(id)) return reply.status(400).send({ error: "bad_restore_session_id" });
         const session = await getOwnedSession(db, userId, id);
         if (!session) return reply.status(404).send({ error: "not_found" });
         if (session.status !== "open") {
@@ -977,7 +976,7 @@ const restoreRoutes: FastifyPluginAsync = async (fastify) => {
     fastify.post("/restore/sessions/:id/verify", authMut, async (request, reply) => {
         const userId = requireUserId(request);
         const { id } = request.params as { id: string };
-        if (!UUID_RE.test(id)) return reply.status(400).send({ error: "bad_restore_session_id" });
+        if (!isUuid(id)) return reply.status(400).send({ error: "bad_restore_session_id" });
         // RestoreVerifySchema is .optional() — success legitimately returns undefined (an empty
         // body), so a falsy check (`!parsed`) is wrong: it would treat a failed validation (null)
         // and a successful empty body the same, and silently answer 200 without doing any work.
@@ -1020,7 +1019,7 @@ const restoreRoutes: FastifyPluginAsync = async (fastify) => {
     fastify.post("/restore/sessions/:id/commit", authMut, async (request, reply) => {
         const userId = requireUserId(request);
         const { id } = request.params as { id: string };
-        if (!UUID_RE.test(id)) return reply.status(400).send({ error: "bad_restore_session_id" });
+        if (!isUuid(id)) return reply.status(400).send({ error: "bad_restore_session_id" });
         // The same reason as /verify: RestoreCommitSchema is .optional(), so null (a failure) must
         // not be confused with a legitimate undefined (a successful empty body).
         if (parseBody(RestoreCommitSchema, request, reply) === null) return;
@@ -1208,7 +1207,7 @@ const restoreRoutes: FastifyPluginAsync = async (fastify) => {
     fastify.post("/restore/sessions/:id/abort", authMut, async (request, reply) => {
         const userId = requireUserId(request);
         const { id } = request.params as { id: string };
-        if (!UUID_RE.test(id)) return reply.status(400).send({ error: "bad_restore_session_id" });
+        if (!isUuid(id)) return reply.status(400).send({ error: "bad_restore_session_id" });
         const now = nowSec();
 
         const prefixes = await db

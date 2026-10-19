@@ -1,3 +1,4 @@
+import { isUuid } from "../lib/params";
 import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { assertKdfParamsFloor, CreateShareSchema, ViewShareSchema } from "@zknotes/shared";
@@ -30,12 +31,8 @@ const SHARE_RL_WINDOW = process.env.SHARE_RATELIMIT_WINDOW ?? "1 minute";
 
 const UNAVAILABLE = { status: "unavailable" as const };
 
-/** UUID v4/v7 (hex plus dashes) — rejects Postgres cast errors on the public share routes. */
-const SHARE_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function isShareUuid(id: string): boolean {
-    return SHARE_UUID_RE.test(id);
-}
+/** Rejects Postgres cast errors on the public share routes. */
+const isShareUuid = isUuid;
 
 type ShareRow = typeof shareLinks.$inferSelect;
 type ShareDb = Pick<typeof db, "select" | "update" | "insert">;

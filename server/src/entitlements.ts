@@ -6,6 +6,7 @@
 //
 // Why a holder rather than a plain value: the routes read the provider **at call time**, so an
 // extension may replace it during registration, before any route has answered.
+import { envPositiveNumber } from "./lib/env";
 import { FILE_LIMITS } from "@zknotes/shared";
 import { count } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
@@ -80,11 +81,7 @@ export async function selfHostRegistrationStatus(tx: EntitlementsDb): Promise<Re
 // The permissive default (seam 2). The numbers are **plan-independent** and come from the
 // environment: whoever hosts decides how much they give. The values are generous on purpose — a
 // self-host is not throttled artificially.
-const num = (key: string, fallback: number): number => {
-    const raw = process.env[key];
-    const parsed = raw === undefined ? Number.NaN : Number(raw);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-};
+const num = envPositiveNumber;
 
 export const permissiveEntitlementsProvider: EntitlementsProvider = {
     name: "permissive-env",

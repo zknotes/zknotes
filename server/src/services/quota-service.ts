@@ -1,3 +1,4 @@
+import { envPositiveNumber } from "../lib/env";
 import { BACKSTOP_FACTOR, FILE_LIMITS, ITEM_LIMITS } from "@zknotes/shared";
 import { eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db";
@@ -33,16 +34,12 @@ export type QuotaDeltas = {
  * of truth. It is read per call so a test can lower the ceiling without restarting the process.
  */
 export function maxItemsCount(): number {
-    const raw = process.env.MAX_ITEMS_COUNT;
-    const parsed = raw === undefined ? Number.NaN : Number(raw);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : ITEM_LIMITS.MAX_ITEMS_COUNT;
+    return envPositiveNumber("MAX_ITEMS_COUNT", ITEM_LIMITS.MAX_ITEMS_COUNT);
 }
 
 /** The live-file ceiling. The ENV override is for ops and tests only, with the same semantics as maxItemsCount. */
 export function maxFileCount(): number {
-    const raw = process.env.MAX_FILE_COUNT;
-    const parsed = raw === undefined ? Number.NaN : Number(raw);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : FILE_LIMITS.MAX_FILE_COUNT;
+    return envPositiveNumber("MAX_FILE_COUNT", FILE_LIMITS.MAX_FILE_COUNT);
 }
 
 /** A user's total item count (notes + folders + files, Trash included). */

@@ -1,3 +1,4 @@
+import { isUuid } from "../lib/params";
 import { GetObjectCommand, HeadObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import {
@@ -16,14 +17,12 @@ import { nowSec } from "../lib/time";
 import { parseBody } from "../lib/validate";
 import { requireUserId } from "../plugins/auth";
 import { S3_BUCKET, s3 } from "../s3";
-import { QuotaExceededError, updateQuotaTx } from "../services/quota-service";
+import { countUserItems, QuotaExceededError, updateQuotaTx } from "../services/quota-service";
 import {
     deleteS3Prefix,
     listUploadChunkObjects,
     userOwnsChunkSetOrUpload,
 } from "../services/storage-service";
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 async function abortTxn(chunkSetId: string, userId: string): Promise<{ code: 200 | 404 | 409 }> {
     return db.transaction(async (tx) => {
@@ -56,7 +55,7 @@ function parseChunkParams(
     | { ok: true; chunkSetId: string; chunkIndex: number }
     | { ok: false; error: "bad_chunk_set_id" | "bad_chunk_index" } {
     const { chunkSetId, index } = request.params as { chunkSetId: string; index: string };
-    if (!UUID_RE.test(chunkSetId)) return { ok: false, error: "bad_chunk_set_id" };
+    if (!isUuid(chunkSetId)) return { ok: false, error: "bad_chunk_set_id" };
     const chunkIndex = Number(index);
     if (!Number.isInteger(chunkIndex) || chunkIndex < 0)
         return { ok: false, error: "bad_chunk_index" };
@@ -215,7 +214,7 @@ const fileRoutes: FastifyPluginAsync = async (fastify) => {
     fastify.post("/uploads/:chunkSetId/urls", authChunkMutRl, async (request, reply) => {
         const userId = requireUserId(request);
         const { chunkSetId } = request.params as { chunkSetId: string };
-        if (!UUID_RE.test(chunkSetId)) return reply.status(400).send({ error: "bad_chunk_set_id" });
+        if (!isUuid(chunkSetId)) return reply.status(400).send({ error: "bad_chunk_set_id" });
 
         const data = parseBody(MintUploadUrlsSchema, request, reply);
         if (!data) return;
@@ -276,7 +275,7 @@ const fileRoutes: FastifyPluginAsync = async (fastify) => {
     fastify.post("/uploads/:chunkSetId/ping", authChunkMutRl, async (request, reply) => {
         const userId = requireUserId(request);
         const { chunkSetId } = request.params as { chunkSetId: string };
-        if (!UUID_RE.test(chunkSetId)) return reply.status(400).send({ error: "bad_chunk_set_id" });
+        if (!isUuid(chunkSetId)) return reply.status(400).send({ error: "bad_chunk_set_id" });
 
         const [session] = await db
             .select({
@@ -318,7 +317,7 @@ const fileRoutes: FastifyPluginAsync = async (fastify) => {
     fastify.get("/uploads/:chunkSetId/status", authChunkMutRl, async (request, reply) => {
         const userId = requireUserId(request);
         const { chunkSetId } = request.params as { chunkSetId: string };
-        if (!UUID_RE.test(chunkSetId)) return reply.status(400).send({ error: "bad_chunk_set_id" });
+        if (!isUuid(chunkSetId)) return reply.status(400).send({ error: "bad_chunk_set_id" });
 
         const [session] = await db
             .select({
@@ -349,7 +348,7 @@ const fileRoutes: FastifyPluginAsync = async (fastify) => {
     fastify.post("/uploads/:chunkSetId/finalize", authMut, async (request, reply) => {
         const userId = requireUserId(request);
         const { chunkSetId } = request.params as { chunkSetId: string };
-        if (!UUID_RE.test(chunkSetId)) return reply.status(400).send({ error: "bad_chunk_set_id" });
+        if (!isUuid(chunkSetId)) return reply.status(400).send({ error: "bad_chunk_set_id" });
 
         const listed = await listUploadChunkObjects(userId, chunkSetId);
         const parsedChunks = listed.map((c) => ({ idx: c.index, size: c.size }));
@@ -452,7 +451,7 @@ const fileRoutes: FastifyPluginAsync = async (fastify) => {
     fastify.delete("/uploads/:chunkSetId", authMut, async (request, reply) => {
         const userId = requireUserId(request);
         const { chunkSetId } = request.params as { chunkSetId: string };
-        if (!UUID_RE.test(chunkSetId)) return reply.status(400).send({ error: "bad_chunk_set_id" });
+        if (!isUuid(chunkSetId)) return reply.status(400).send({ error: "bad_chunk_set_id" });
 
         const res = await abortTxn(chunkSetId, userId);
         if (res.code !== 200) {
@@ -559,11 +558,7 @@ const fileRoutes: FastifyPluginAsync = async (fastify) => {
             .limit(1);
         if (!user) return reply.status(401).send({ error: "Unauthorized" });
 
-        const [itemCountRes] = await db
-            .select({ count: sql<number>`count(*)::int` })
-            .from(items)
-            .where(eq(items.user_id, userId));
-        const total_items = itemCountRes?.count ?? 0;
+        const total_items = await countUserItems(db, userId);
         // Seams 2 and 5: the client gets only the plan label and whether it is paid, not a taxonomy of plans.
         const limits = await fastify.entitlements.forUser(db, userId);
 

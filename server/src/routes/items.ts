@@ -30,9 +30,11 @@ import {
     getOwnedItem,
     hasOtherLiveChunkSetRef,
     ItemRejected,
+    parentRejection,
     purgeOwnedItem,
     purgeOwnedItemsBatch,
     releaseChunkSetIfUnreferenced,
+    trashTransitionDeltas,
 } from "../services/item-service";
 import {
     beginQuotaAccumulator,
@@ -294,20 +296,8 @@ const itemRoutes: FastifyPluginAsync = async (fastify) => {
         // orphan files.
         if (data.parent_id !== null) {
             const parent = await getOwnedItem(db, data.parent_id, userId);
-            const childTrashed = data.deleted_at != null;
-            if (
-                !parent ||
-                parent.purged_at != null ||
-                (parent.deleted_at != null && !childTrashed)
-            ) {
-                return reply.status(400).send({ error: "Parent not found" });
-            }
-            if (data.type === "file" && parent.type !== "note") {
-                return reply.status(400).send({ error: "File parent must be a note" });
-            }
-            if (data.type !== "file" && parent.type !== "folder") {
-                return reply.status(400).send({ error: "Parent is not a folder" });
-            }
+            const rejection = parentRejection(parent, data.type, data.deleted_at != null);
+            if (rejection) return reply.status(400).send({ error: rejection });
         }
 
         // Cycle detection check
@@ -371,20 +361,8 @@ const itemRoutes: FastifyPluginAsync = async (fastify) => {
             // A purged or trashed parent (for a READY child) = not found.
             if (data.parent_id !== null) {
                 const parent = await getOwnedItem(db, data.parent_id, userId);
-                const childTrashed = data.deleted_at != null;
-                if (
-                    !parent ||
-                    parent.purged_at != null ||
-                    (parent.deleted_at != null && !childTrashed)
-                ) {
-                    return reply.status(400).send({ error: "Parent not found" });
-                }
-                if (current.type === "file" && parent.type !== "note") {
-                    return reply.status(400).send({ error: "File parent must be a note" });
-                }
-                if (current.type !== "file" && parent.type !== "folder") {
-                    return reply.status(400).send({ error: "Parent is not a folder" });
-                }
+                const rejection = parentRejection(parent, current.type, data.deleted_at != null);
+                if (rejection) return reply.status(400).send({ error: rejection });
             }
             const parentMap = await buildFolderParentMap(userId);
             if (createsCycle(id, data.parent_id, parentMap)) {
@@ -564,31 +542,24 @@ const itemRoutes: FastifyPluginAsync = async (fastify) => {
             // The ciphertext is KEPT on trash (see below), so the bytes still
             // exist in the database — they only change bucket (`items` → `trash`), as does a file's
             // blob. `+=` because the blob delta (if this is a file) goes into the same bucket.
-            let dTrash = oldPayloadSize;
-
-            if (
-                locked.chunk_set_id &&
-                !(await hasOtherLiveChunkSetRef(tx, locked.chunk_set_id, userId, locked.id))
-            ) {
-                const [cs] = await tx
-                    .select({ total_size: chunkSets.total_size })
-                    .from(chunkSets)
-                    .where(eq(chunkSets.id, locked.chunk_set_id))
-                    .limit(1);
-                if (cs) {
-                    dFiles = -Number(cs.total_size);
-                    dTrash += Number(cs.total_size);
-                }
-            }
+            const deltas = await trashTransitionDeltas(
+                tx,
+                locked,
+                userId,
+                oldPayloadSize,
+                async (chunkSetId) => {
+                    const [cs] = await tx
+                        .select({ total_size: chunkSets.total_size })
+                        .from(chunkSets)
+                        .where(eq(chunkSets.id, chunkSetId))
+                        .limit(1);
+                    return cs ? Number(cs.total_size) : undefined;
+                },
+            );
 
             // enforceStrictLimit=false: trashing must never be blocked by the hard limit —
             // otherwise a user over the limit cannot even delete to free up space.
-            await updateQuotaTx(
-                tx,
-                userId,
-                { items: -oldPayloadSize, files: dFiles, trash: dTrash },
-                false,
-            );
+            await updateQuotaTx(tx, userId, deltas, false);
 
             await tx
                 .update(items)
@@ -826,24 +797,13 @@ const itemRoutes: FastifyPluginAsync = async (fastify) => {
                             // the child also arrives with deleted_at (synced cascade trash,
                             // note→files); a READY child under a trashed parent is an orphan path →
                             // reject.
-                            const childTrashed = itemData.deleted_at != null;
-                            if (
-                                !parent ||
-                                parent.user_id !== userId ||
-                                parent.purged_at != null ||
-                                (parent.deleted_at != null && !childTrashed)
-                            ) {
-                                errors.push({ id: itemData.id, error: "Parent not found" });
-                                continue;
-                            }
-                            if (itemData.type === "file" && parent.type !== "note") {
-                                errors.push({
-                                    id: itemData.id,
-                                    error: "File parent must be a note",
-                                });
-                                continue;
-                            } else if (itemData.type !== "file" && parent.type !== "folder") {
-                                errors.push({ id: itemData.id, error: "Parent is not a folder" });
+                            const rejection = parentRejection(
+                                parent && parent.user_id === userId ? parent : undefined,
+                                itemData.type,
+                                itemData.deleted_at != null,
+                            );
+                            if (rejection) {
+                                errors.push({ id: itemData.id, error: rejection });
                                 continue;
                             }
                         }
@@ -965,23 +925,16 @@ const itemRoutes: FastifyPluginAsync = async (fastify) => {
                             // in EXACTLY one bucket.
                             if (!wasTrashed && isTrashed) {
                                 // READY → TRASHED: payload and blob move into `trash`.
-                                dItems = -oldPayloadSize;
-                                dTrash += oldPayloadSize;
-                                if (
-                                    current.chunk_set_id &&
-                                    !(await hasOtherLiveChunkSetRef(
-                                        tx,
-                                        current.chunk_set_id,
-                                        userId,
-                                        current.id,
-                                    ))
-                                ) {
-                                    const cs = chunkSetMap.get(current.chunk_set_id);
-                                    if (cs) {
-                                        dFiles -= cs.total_size;
-                                        dTrash += cs.total_size;
-                                    }
-                                }
+                                const d = await trashTransitionDeltas(
+                                    tx,
+                                    current,
+                                    userId,
+                                    oldPayloadSize,
+                                    async (chunkSetId) => chunkSetMap.get(chunkSetId)?.total_size,
+                                );
+                                dItems += d.items;
+                                dFiles += d.files;
+                                dTrash += d.trash;
                             } else if (wasTrashed && !isTrashed) {
                                 // TRASHED → READY: the new payload enters `items`, the old one leaves `trash`.
                                 dItems = newPayloadSize;

@@ -3,7 +3,9 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { db, pgClient } from "../db";
 import { HISTORY_HARD_CAP, itemHistory } from "../db/schema";
+import type { DbExecutor } from "../db/types";
 import { nowSec } from "../lib/time";
+import { getItemStorageSize } from "./quota-service";
 
 export interface NumberedSnapshotRow {
     id: string;
@@ -54,7 +56,6 @@ export async function getNumberedSnapshot(
     return row;
 }
 
-import type { DbExecutor } from "../db/types";
 /**
  * Tiered thin-out: after a new snapshot is inserted, delete old ones so that a useful
  * span of history fits inside the hard cap of 50 snapshots:
@@ -64,8 +65,6 @@ import type { DbExecutor } from "../db/types";
  *
  * It runs inline on every POST — no background job is needed.
  */
-import { getItemStorageSize } from "./quota-service";
-
 export async function thinOut(tx: DbExecutor, itemId: string, userId: string): Promise<number> {
     const all = await tx
         .select({ id: itemHistory.id, created_at: itemHistory.created_at })

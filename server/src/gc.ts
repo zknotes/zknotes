@@ -9,7 +9,7 @@
 // those two steps leaves an orphan on disk, which the next runDeepRepair() reclaims. Never the
 // other way round. Idempotent; safe to repeat.
 
-import { DeleteObjectsCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
+import { DeleteObjectsCommand } from "@aws-sdk/client-s3";
 import { FILE_LIMITS } from "@zknotes/shared";
 import { and, eq, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { markPendingDelete } from "./blob-sweeper";
@@ -33,7 +33,7 @@ import { releaseRestoreStaging } from "./services/restore-service";
 import { S3_BUCKET, s3 } from "./s3";
 import { purgeOwnedItem } from "./services/item-service";
 import { purgeStaleSignInFailures } from "./services/login-throttle";
-import { deleteS3Prefix } from "./services/storage-service";
+import { deleteS3Prefix, listObjects, prefixHasObjects } from "./services/storage-service";
 
 // BLOB_PURGE_GRACE: how many seconds we wait between the pending_delete mark and the physical
 // deletion. Default 1h — it gives a window for a crop undo.
@@ -576,38 +576,17 @@ export async function runDeepRepair(opts: DeepRepairOptions = {}): Promise<DeepR
 
     // 1. S3 objects the DB does not know about → delete
     try {
-        let continuationToken: string | undefined;
         const batchToDelete: { Key: string }[] = [];
-        do {
-            const res = await s3.send(
-                new ListObjectsV2Command({
-                    Bucket: S3_BUCKET,
-                    Prefix: "u/",
-                    ContinuationToken: continuationToken,
-                }),
-            );
-            if (res.Contents) {
-                for (const obj of res.Contents) {
-                    if (!obj.Key) continue;
-                    const parts = obj.Key.split("/");
-                    if (parts.length >= 4) {
-                        const cs = parts[2];
-                        if (cs && !known.has(cs)) {
-                            // Skip objects newer than the stale-upload window — a session opened
-                            // after the snapshot, or a PUT still in flight, must not be deleted.
-                            if (
-                                obj.LastModified &&
-                                obj.LastModified.getTime() > objectStaleCutoffMs
-                            ) {
-                                continue;
-                            }
-                            batchToDelete.push({ Key: obj.Key });
-                        }
-                    }
-                }
-            }
-            continuationToken = res.NextContinuationToken;
-        } while (continuationToken);
+        for await (const obj of listObjects("u/")) {
+            const parts = obj.key.split("/");
+            if (parts.length < 4) continue;
+            const cs = parts[2];
+            if (!cs || known.has(cs)) continue;
+            // Skip objects newer than the stale-upload window — a session opened after the
+            // snapshot, or a PUT still in flight, must not be deleted.
+            if (obj.lastModified && obj.lastModified.getTime() > objectStaleCutoffMs) continue;
+            batchToDelete.push({ Key: obj.key });
+        }
 
         if (batchToDelete.length > 0) {
             const candidateIds = [
@@ -657,14 +636,7 @@ export async function runDeepRepair(opts: DeepRepairOptions = {}): Promise<DeepR
         .from(chunkSets);
     for (const cs of allSets) {
         try {
-            const res = await s3.send(
-                new ListObjectsV2Command({
-                    Bucket: S3_BUCKET,
-                    Prefix: `u/${cs.user_id}/${cs.id}/`,
-                    MaxKeys: 1,
-                }),
-            );
-            if (!res.Contents || res.Contents.length === 0) {
+            if (!(await prefixHasObjects(`u/${cs.user_id}/${cs.id}/`))) {
                 const [liveRef] = await db
                     .select({ id: items.id })
                     .from(items)

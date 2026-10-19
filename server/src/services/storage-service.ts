@@ -6,72 +6,85 @@ import { db } from "../db";
 import { chunkSets, uploadSessions } from "../db/schema";
 import { S3_BUCKET, s3 } from "../s3";
 
-/**
- * Deletes every S3 object under `u/<userId>/<chunkSetId>/`. Best effort: errors are swallowed
- * because the deep-repair sweep (gc.ts) picks up whatever is left behind.
- */
 export interface ListedUploadChunk {
     index: number;
     size: number;
 }
 
-/** A paginated ListObjectsV2 under `u/<userId>/<chunkSetId>/` — one record per index. */
-export async function listUploadChunkObjects(
-    userId: string,
-    chunkSetId: string,
-): Promise<ListedUploadChunk[]> {
-    const prefix = `u/${userId}/${chunkSetId}/`;
-    const byIndex = new Map<number, number>();
+/** One S3 object as the listing reports it. */
+export interface ListedObject {
+    key: string;
+    size: number;
+    lastModified: Date | undefined;
+}
+
+/**
+ * Every object under `prefix`, page by page (ListObjectsV2 with its continuation token). The one
+ * pagination loop — three callers used to write it out: the chunk listing, the prefix delete and
+ * the deep repair's bucket walk.
+ */
+export async function* listObjects(prefix: string): AsyncGenerator<ListedObject> {
     let continuationToken: string | undefined;
     do {
-        const listRes = await s3.send(
+        const page = await s3.send(
             new ListObjectsV2Command({
                 Bucket: S3_BUCKET,
                 Prefix: prefix,
                 ContinuationToken: continuationToken,
             }),
         );
-        for (const obj of listRes.Contents ?? []) {
-            const idx = Number((obj.Key ?? "").split("/").pop());
-            if (Number.isInteger(idx) && idx >= 0) {
-                byIndex.set(idx, obj.Size ?? 0);
-            }
+        for (const obj of page.Contents ?? []) {
+            if (!obj.Key) continue;
+            yield { key: obj.Key, size: obj.Size ?? 0, lastModified: obj.LastModified };
         }
-        continuationToken = listRes.NextContinuationToken;
+        continuationToken = page.NextContinuationToken;
     } while (continuationToken);
+}
 
+/** Whether anything at all lives under `prefix` — one request, one key. */
+export async function prefixHasObjects(prefix: string): Promise<boolean> {
+    const page = await s3.send(
+        new ListObjectsV2Command({ Bucket: S3_BUCKET, Prefix: prefix, MaxKeys: 1 }),
+    );
+    return (page.Contents?.length ?? 0) > 0;
+}
+
+/** Deletes the given keys in batches of 1000 (the DeleteObjects cap). */
+export async function deleteObjectKeys(keys: string[]): Promise<void> {
+    for (let i = 0; i < keys.length; i += 1000) {
+        await s3.send(
+            new DeleteObjectsCommand({
+                Bucket: S3_BUCKET,
+                Delete: { Objects: keys.slice(i, i + 1000).map((Key) => ({ Key })) },
+            }),
+        );
+    }
+}
+
+/** The objects under `u/<userId>/<chunkSetId>/` — one record per index, sorted. */
+export async function listUploadChunkObjects(
+    userId: string,
+    chunkSetId: string,
+): Promise<ListedUploadChunk[]> {
+    const byIndex = new Map<number, number>();
+    for await (const obj of listObjects(`u/${userId}/${chunkSetId}/`)) {
+        const idx = Number(obj.key.split("/").pop());
+        if (Number.isInteger(idx) && idx >= 0) byIndex.set(idx, obj.size);
+    }
     return [...byIndex.entries()]
         .sort((a, b) => a[0] - b[0])
         .map(([index, size]) => ({ index, size }));
 }
 
+/**
+ * Deletes every S3 object under `u/<userId>/<chunkSetId>/`. Best effort: errors are swallowed
+ * because the deep-repair sweep (gc.ts) picks up whatever is left behind.
+ */
 export async function deleteS3Prefix(userId: string, chunkSetId: string): Promise<void> {
     try {
-        const prefix = `u/${userId}/${chunkSetId}/`;
-        let continuationToken: string | undefined;
-        do {
-            const listRes = await s3.send(
-                new ListObjectsV2Command({
-                    Bucket: S3_BUCKET,
-                    Prefix: prefix,
-                    ContinuationToken: continuationToken,
-                }),
-            );
-            const objectsToDelete = (listRes.Contents ?? [])
-                .filter((obj) => obj.Key)
-                .map((obj) => ({ Key: obj.Key! }));
-            if (objectsToDelete.length > 0) {
-                for (let i = 0; i < objectsToDelete.length; i += 1000) {
-                    await s3.send(
-                        new DeleteObjectsCommand({
-                            Bucket: S3_BUCKET,
-                            Delete: { Objects: objectsToDelete.slice(i, i + 1000) },
-                        }),
-                    );
-                }
-            }
-            continuationToken = listRes.NextContinuationToken;
-        } while (continuationToken);
+        const keys: string[] = [];
+        for await (const obj of listObjects(`u/${userId}/${chunkSetId}/`)) keys.push(obj.key);
+        await deleteObjectKeys(keys);
     } catch {
         // best-effort; deep-repair catches the rest
     }

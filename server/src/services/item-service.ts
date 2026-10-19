@@ -18,6 +18,54 @@ import {
     updateQuotaTx,
 } from "./quota-service";
 
+/** The ciphertext bytes of history rows — the one SQL expression for the history quota. */
+const historyBytesSql = sql<number>`SUM(LENGTH(${itemHistory.encrypted_payload}) + LENGTH(${itemHistory.payload_nonce}) + LENGTH(${itemHistory.encrypted_item_key}) + LENGTH(${itemHistory.item_key_nonce}))`;
+
+/**
+ * Why a parent cannot take this child, or null when it can. A purged parent is gone; a trashed
+ * parent takes only a child that arrives trashed too (a synced cascade), otherwise a READY child
+ * under it would be an orphan path; a file hangs under a note, everything else under a folder.
+ * POST, PUT and the batch used to spell these three answers out each.
+ */
+export function parentRejection(
+    parent: { type: string; deleted_at: number | null; purged_at: number | null } | undefined,
+    childType: string,
+    childTrashed: boolean,
+): string | null {
+    if (!parent || parent.purged_at != null || (parent.deleted_at != null && !childTrashed)) {
+        return "Parent not found";
+    }
+    if (childType === "file" && parent.type !== "note") return "File parent must be a note";
+    if (childType !== "file" && parent.type !== "folder") return "Parent is not a folder";
+    return null;
+}
+
+/**
+ * The quota movement of READY → TRASHED: the payload bytes change bucket (`items` → `trash`), and
+ * so does the blob when no other live item still references the chunk set. `chunkSetSize` is read
+ * only when that is the case (the batch answers from its prefetched map, DELETE asks the database).
+ */
+export async function trashTransitionDeltas(
+    tx: DbExecutor,
+    item: { id: string; chunk_set_id: string | null },
+    userId: string,
+    payloadSize: number,
+    chunkSetSize: (chunkSetId: string) => Promise<number | undefined>,
+): Promise<{ items: number; files: number; trash: number }> {
+    const deltas = { items: -payloadSize, files: 0, trash: payloadSize };
+    if (
+        item.chunk_set_id &&
+        !(await hasOtherLiveChunkSetRef(tx, item.chunk_set_id, userId, item.id))
+    ) {
+        const size = await chunkSetSize(item.chunk_set_id);
+        if (size) {
+            deltas.files -= size;
+            deltas.trash += size;
+        }
+    }
+    return deltas;
+}
+
 type ItemRow = typeof items.$inferSelect;
 
 /**
@@ -202,11 +250,9 @@ export async function purgeItemTx(
     // Permanently deleting a note that has history must first sum the size of its
     // snapshots in item_history and explicitly reduce storage_used_history.
     const historyRows = await tx
-        .select({
-            ciphertext_size: sql<number>`SUM(LENGTH(encrypted_payload) + LENGTH(payload_nonce) + LENGTH(encrypted_item_key) + LENGTH(item_key_nonce))`,
-        })
-        .from(sql`item_history`)
-        .where(eq(sql`item_id`, current.id));
+        .select({ ciphertext_size: historyBytesSql })
+        .from(itemHistory)
+        .where(and(eq(itemHistory.item_id, current.id), eq(itemHistory.user_id, userId)));
 
     const histSize = Number(historyRows[0]?.ciphertext_size ?? 0);
     if (histSize > 0) {
@@ -391,7 +437,7 @@ export async function purgeOwnedItemsBatch(
     const histRows = await tx
         .select({
             item_id: itemHistory.item_id,
-            bytes: sql<number>`SUM(LENGTH(${itemHistory.encrypted_payload}) + LENGTH(${itemHistory.payload_nonce}) + LENGTH(${itemHistory.encrypted_item_key}) + LENGTH(${itemHistory.item_key_nonce}))`,
+            bytes: historyBytesSql,
         })
         .from(itemHistory)
         .where(and(eq(itemHistory.user_id, userId), inArray(itemHistory.item_id, purgeIds)))
