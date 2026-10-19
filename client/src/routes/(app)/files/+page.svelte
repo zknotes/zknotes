@@ -6,14 +6,16 @@ import { goto, replaceState } from "$app/navigation";
 import { page } from "$app/state";
 import { treeItemsQueryOptions } from "$lib/core/data/item-queries";
 import {
+    type FileSort,
+    type FileTypeFilter,
     filterFilesByScope,
     matchesFileType,
+    type ParsedScope,
     parseScopeParam,
     parseTypeParam,
-    type FileTypeFilter,
-    type ParsedScope,
     scopeLabel,
     scopeToParam,
+    sortFiles,
     typeToParam,
 } from "$lib/core/data/file-filters";
 import { type DecryptedItemMeta, folderPathSegments } from "$lib/core/data/items";
@@ -42,9 +44,7 @@ let deleting = $state(false);
 let deleteDialog = $state<{ fileIds: string[] } | null>(null);
 
 let searchQuery = $state("");
-let sortBy = $state<
-    "updated_desc" | "updated_asc" | "size_desc" | "size_asc" | "name_asc" | "type_asc"
->("updated_desc");
+let sortBy = $state<FileSort>("updated_desc");
 
 let scope = $state<ParsedScope>({ kind: "all" });
 let typeFilter = $state<FileTypeFilter>("all");
@@ -207,20 +207,7 @@ let files = $derived.by<VirtualItem[]>(() => {
     rawFiles = filterFilesByScope(rawFiles, scope, allItems);
     rawFiles = rawFiles.filter((f) => matchesFileType(f.mime, typeFilter));
 
-    rawFiles.sort((a, b) => {
-        if (sortBy === "updated_desc") return b.updated_at - a.updated_at;
-        if (sortBy === "updated_asc") return a.updated_at - b.updated_at;
-        if (sortBy === "size_desc") return (b.size || 0) - (a.size || 0);
-        if (sortBy === "size_asc") return (a.size || 0) - (b.size || 0);
-        if (sortBy === "name_asc") return a.title.localeCompare(b.title);
-        if (sortBy === "type_asc") {
-            const typeA = a.mime || "";
-            const typeB = b.mime || "";
-            if (typeA !== typeB) return typeA.localeCompare(typeB);
-            return a.title.localeCompare(b.title);
-        }
-        return b.updated_at - a.updated_at;
-    });
+    rawFiles = sortFiles(rawFiles, sortBy);
 
     const q = searchQuery.trim().toLowerCase();
     if (q) {

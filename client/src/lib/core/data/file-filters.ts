@@ -94,3 +94,41 @@ export function scopeLabel(scope: ParsedScope, items: DecryptedItemMeta[]): stri
     if (scope.kind === "note") return hit?.title ?? "Note";
     return hit?.title ?? "Folder";
 }
+
+export type FileSort =
+    | "updated_desc"
+    | "updated_asc"
+    | "size_desc"
+    | "size_asc"
+    | "name_asc"
+    | "type_asc";
+
+/**
+ * The Files page order. A missing size counts as 0; "by type" groups on the mime and then by title;
+ * names compare locale-aware. Returns a new array — the caller's list is left as it is.
+ */
+export function sortFiles<
+    T extends { title: string; updated_at: number; size?: number; mime?: string },
+>(files: readonly T[], sortBy: FileSort): T[] {
+    return [...files].sort((a, b) => {
+        switch (sortBy) {
+            case "updated_asc":
+                return a.updated_at - b.updated_at;
+            case "size_desc":
+                return (b.size || 0) - (a.size || 0);
+            case "size_asc":
+                return (a.size || 0) - (b.size || 0);
+            case "name_asc":
+                return a.title.localeCompare(b.title);
+            case "type_asc": {
+                const typeA = a.mime || "";
+                const typeB = b.mime || "";
+                return typeA !== typeB
+                    ? typeA.localeCompare(typeB)
+                    : a.title.localeCompare(b.title);
+            }
+            default:
+                return b.updated_at - a.updated_at;
+        }
+    });
+}
