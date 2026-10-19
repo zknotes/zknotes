@@ -1,7 +1,7 @@
 <script lang="ts">
-import { CreditCard, ExternalLink, KeyRound, Loader2 } from "lucide-svelte";
+import { CreditCard, ExternalLink, KeyRound } from "lucide-svelte";
 import { onMount } from "svelte";
-import { SettingsCard } from "$lib/core/ui";
+import { Callout, SectionHeader, SettingsCard } from "$lib/core/ui";
 import Button from "$lib/core/ui/Button.svelte";
 import PasswordStrength from "$lib/core/ui/PasswordStrength.svelte";
 import WeakPasswordWarning from "$lib/core/ui/WeakPasswordWarning.svelte";
@@ -101,12 +101,10 @@ async function changePassword() {
 }
 </script>
 
-<div class="mb-8">
-    <h1 class="text-2xl font-bold text-[var(--text)]">Account</h1>
-    <p class="text-[var(--text-muted)] mt-1 text-sm">
-        {hasPlan ? "Your plan and account security" : "Your account security"}
-    </p>
-</div>
+<SectionHeader
+    title="Account"
+    description={hasPlan ? "Your plan and account security" : "Your account security"}
+/>
 
 <div class="divide-y divide-[var(--stroke)]">
 {#if planView && hasPlan}
@@ -149,16 +147,11 @@ async function changePassword() {
         <!-- Hidden username field to satisfy browser accessibility warnings -->
         <input type="text" autocomplete="username" class="hidden" value="zknotes-user" aria-hidden="true" />
         {#if error}
-            <div class="p-4 bg-[var(--danger)]/10 text-[var(--danger)] text-sm rounded-xl border border-[var(--danger)]/20 font-medium">
-                {error}
-            </div>
+            <Callout>{error}</Callout>
         {/if}
         {#if success}
-            <div class="p-4 bg-brand0/10 text-brand0 text-sm rounded-xl border border-brand0/20 font-medium">
-                <div class="flex items-center gap-2 mb-2">
-                    <span class="text-xl">✅</span>
-                    <span>Password changed successfully!</span>
-                </div>
+            <Callout variant="success" icon>
+                <p class="font-medium">Password changed successfully!</p>
                 {#if showDownloadPrompt}
                     <div class="mt-4 pt-4 border-t border-brand0/20">
                         <p class="mb-4">Your existing backups are unaffected — they use a separate passphrase. Want to create a fresh backup now?</p>
@@ -180,7 +173,7 @@ async function changePassword() {
                         </div>
                     </div>
                 {/if}
-            </div>
+            </Callout>
         {/if}
 
         <div class="space-y-4">
@@ -249,11 +242,10 @@ async function changePassword() {
                 variant="primary"
                 type="submit"
                 size="lg"
-                disabled={isWorking}
+                loading={isWorking}
                 class="w-full rounded-xl font-semibold shadow-md hover:shadow-lg"
             >
                 {#if isWorking}
-                    <Loader2 class="w-5 h-5 animate-spin" />
                     <span>{progressMessage}</span>
                 {:else}
                     {SUBMIT_LABEL}

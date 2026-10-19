@@ -1,5 +1,6 @@
 /** The ui module's public API — the generic and app-shell components (one location). */
 export { default as Button } from "./Button.svelte";
+export { default as Callout } from "./Callout.svelte";
 export { default as Checkbox } from "./Checkbox.svelte";
 export { default as CollectionEmptyState } from "./CollectionEmptyState.svelte";
 export { default as CollectionList } from "./CollectionList.svelte";
@@ -16,17 +17,21 @@ export { default as Input } from "./Input.svelte";
 export { default as ItemContextMenu } from "./ItemContextMenu.svelte";
 export { default as ItemTitle } from "./ItemTitle.svelte";
 export { default as Kbd } from "./Kbd.svelte";
+export { default as LocationMeta } from "./LocationMeta.svelte";
 export { default as Logo } from "./Logo.svelte";
 export { default as MenuItem } from "./MenuItem.svelte";
 export { default as MetaText } from "./MetaText.svelte";
 export { default as PageHeader } from "./PageHeader.svelte";
 export { default as SearchBar } from "./SearchBar.svelte";
 export { default as SearchDialog } from "./SearchDialog.svelte";
+export { default as SectionHeader } from "./SectionHeader.svelte";
 export { default as SegmentedControl } from "./SegmentedControl.svelte";
 export { default as SettingsCard } from "./SettingsCard.svelte";
 export { default as SidebarAppMenu } from "./SidebarAppMenu.svelte";
+export { default as StorageSegments } from "./StorageSegments.svelte";
 export { default as ThemePicker } from "./ThemePicker.svelte";
 export { default as Toast } from "./Toast.svelte";
 export { default as ToolbarSearch } from "./ToolbarSearch.svelte";
 export { default as UiZoomPicker } from "./UiZoomPicker.svelte";
 export { default as UtilityCloseButton } from "./UtilityCloseButton.svelte";
+export { FrozenPopover } from "./frozen-popover.svelte";

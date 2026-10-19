@@ -1,11 +1,11 @@
 <script lang="ts">
 import { useQueryClient } from "@tanstack/svelte-query";
 import { Clock, FileText, Folder, Paperclip, Plus, Search, Shield, Zap } from "lucide-svelte";
-import type { ComponentType } from "svelte";
 import { tick } from "svelte";
 import { goto } from "$app/navigation";
 import { QUERY_KEYS } from "$lib/core/constants/query-keys";
 import type { DecryptedItemMeta } from "$lib/core/data/items";
+import type { LucideIcon } from "$lib/core/types/icons";
 import { groupByType, highlightSegments, type RankedHit, searchItems } from "$lib/core/search";
 import { ItemService } from "$lib/core/services/item-service";
 import { activeSidebarId } from "$lib/core/stores/active-sidebar-id.svelte";
@@ -22,7 +22,7 @@ import { Button, ItemTitle, EmptyState, Eyebrow, Kbd, MetaText } from "$lib/core
 
 const RESULT_LIMIT = 8;
 
-const SECTION_ICONS: Record<string, ComponentType> = {
+const SECTION_ICONS: Record<string, LucideIcon> = {
     recent: Clock,
     note: FileText,
     folder: Folder,
@@ -62,7 +62,7 @@ const actionRows = $derived(list.query.trim() ? 1 : 0);
 interface PaletteSection {
     key: string;
     label: string;
-    icon: ComponentType;
+    icon: LucideIcon;
     rows: Array<{ hit: RankedHit; index: number }>;
 }
 
@@ -147,7 +147,7 @@ function onDialogClick(e: MouseEvent) {
 
 <svelte:window onkeydown={onWindowKeydown} />
 
-{#snippet sectionHeader(label: string, Icon: ComponentType)}
+{#snippet sectionHeader(label: string, Icon: LucideIcon)}
     <Eyebrow class="flex items-center gap-1.5 px-4 pt-2.5 pb-1 select-none">
         <Icon class="w-[0.625rem] h-[0.625rem] shrink-0" />
         {label}

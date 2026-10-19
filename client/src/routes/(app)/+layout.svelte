@@ -1,21 +1,18 @@
 <script lang="ts">
 import { createQuery, useQueryClient } from "@tanstack/svelte-query";
 import {
-    Clock,
     FolderPlus,
     Lock,
     PanelLeftClose,
     PanelLeftOpen,
     PenLine,
     ShieldCheck,
-    Star,
-    Trash2,
-    Files,
 } from "lucide-svelte";
 import { onMount, untrack } from "svelte";
 import { goto, onNavigate } from "$app/navigation";
 import { page } from "$app/state";
 import { QUERY_KEYS } from "$lib/core/constants/query-keys";
+import { QUICK_VIEWS, type QuickView, quickViewForPath } from "$lib/core/constants/views";
 import { deletedItemsQueryOptions, treeItemsQueryOptions } from "$lib/core/data/item-queries";
 import { countVisibleTrashItems, type DecryptedItemMeta } from "$lib/core/data/items";
 import { loadOrBuildIndex } from "$lib/core/search";
@@ -104,16 +101,16 @@ let starredCount = $derived(
 // than as separate rows.
 let trashCount = $derived(countVisibleTrashItems(deletedItemsQuery.data ?? []));
 let filesCount = $derived((treeItemsQuery.data ?? []).filter((i) => i.type === "file").length);
+// The counters next to the quick-access buttons; Recent has none.
+let quickCounts = $derived<Record<QuickView["id"], number | null>>({
+    starred: starredCount,
+    trash: trashCount,
+    recent: null,
+    files: filesCount,
+});
 
 // The active view derived from the current route
-let activeView = $derived.by(() => {
-    const path = page.url.pathname;
-    if (path.startsWith("/starred")) return "starred";
-    if (path.startsWith("/trash")) return "trash";
-    if (path.startsWith("/recent")) return "recent";
-    if (path.startsWith("/files")) return "files";
-    return "notes";
-});
+let activeView = $derived(quickViewForPath(page.url.pathname)?.id ?? "notes");
 
 // The utility return stack: the navigate helper + the live-note check from the tree query
 utilityReturnStore.setNavigate((path, opts) => goto(path, opts));
@@ -152,11 +149,11 @@ onNavigate(() => {
     return clearDocumentTextSelection;
 });
 
-function openOrCloseUtility(view: "starred" | "trash" | "recent" | "files", path: string) {
-    if (activeView === view) {
+function openOrCloseUtility(view: QuickView) {
+    if (activeView === view.id) {
         utilityReturnStore.close();
     } else {
-        void goto(path);
+        void goto(view.path);
     }
 }
 
@@ -513,77 +510,31 @@ function handleGlobalKeyDown(e: KeyboardEvent) {
                      The counter renders only when it is > 0 — an empty min-w slot ate space on a
                      narrow sidebar and truncated the labels to "St…" / "Tr…" while room remained. -->
                 <div class="px-3 pb-2 grid grid-cols-2 gap-1">
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        active={activeView === 'starred'}
-                        class="w-full !px-1.5 !gap-1 !justify-start min-w-0"
-                        onclick={() => openOrCloseUtility('starred', '/starred')}
-                        title="Starred notes"
-                    >
-                        <Star class="w-3 h-3 shrink-0 {activeView === 'starred' ? 'text-amber-400 fill-current' : 'text-[var(--text-dim)]'}" />
-                        <span class="truncate min-w-0">Starred</span>
-                        {#if starredCount > 0}
-                            <span
-                                class="font-mono text-2xs tabular-nums ml-auto shrink-0 text-right {activeView === 'starred'
-                                    ? 'text-amber-400/70'
-                                    : 'text-[var(--text-dim)]'}"
-                            >
-                                {starredCount}
-                            </span>
-                        {/if}
-                    </Button>
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        active={activeView === 'trash'}
-                        class="w-full !px-1.5 !gap-1 !justify-start min-w-0"
-                        onclick={() => openOrCloseUtility('trash', '/trash')}
-                        title="Trash"
-                    >
-                        <Trash2 class="w-3 h-3 shrink-0 {activeView === 'trash' ? 'text-rose-400' : 'text-[var(--text-dim)]'}" />
-                        <span class="truncate min-w-0">Trash</span>
-                        {#if trashCount > 0}
-                            <span
-                                class="font-mono text-2xs tabular-nums ml-auto shrink-0 text-right {activeView === 'trash'
-                                    ? 'text-rose-400/70'
-                                    : 'text-[var(--text-dim)]'}"
-                            >
-                                {trashCount}
-                            </span>
-                        {/if}
-                    </Button>
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        active={activeView === 'recent'}
-                        class="w-full !px-1.5 !gap-1 !justify-start min-w-0"
-                        onclick={() => openOrCloseUtility('recent', '/recent')}
-                        title="Recently opened"
-                    >
-                        <Clock class="w-3 h-3 shrink-0 {activeView === 'recent' ? 'text-sky-400' : 'text-[var(--text-dim)]'}" />
-                        <span class="truncate min-w-0">Recent</span>
-                    </Button>
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        active={activeView === 'files'}
-                        class="w-full !px-1.5 !gap-1 !justify-start min-w-0"
-                        onclick={() => openOrCloseUtility('files', '/files')}
-                        title="All files"
-                    >
-                        <Files class="w-3 h-3 shrink-0 {activeView === 'files' ? 'text-indigo-400' : 'text-[var(--text-dim)]'}" />
-                        <span class="truncate min-w-0">Files</span>
-                        {#if filesCount > 0}
-                            <span
-                                class="font-mono text-2xs tabular-nums ml-auto shrink-0 text-right {activeView === 'files'
-                                    ? 'text-indigo-400/70'
-                                    : 'text-[var(--text-dim)]'}"
-                            >
-                                {filesCount}
-                            </span>
-                        {/if}
-                    </Button>
+                    {#each QUICK_VIEWS as view (view.id)}
+                        {@const Icon = view.icon}
+                        {@const isActive = activeView === view.id}
+                        {@const count = quickCounts[view.id]}
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            active={isActive}
+                            class="w-full !px-1.5 !gap-1 !justify-start min-w-0"
+                            onclick={() => openOrCloseUtility(view)}
+                            title={view.title}
+                        >
+                            <Icon class="w-3 h-3 shrink-0 {isActive ? view.activeIconClass : 'text-[var(--text-dim)]'}" />
+                            <span class="truncate min-w-0">{view.label}</span>
+                            {#if count != null && count > 0}
+                                <span
+                                    class="font-mono text-2xs tabular-nums ml-auto shrink-0 text-right {isActive
+                                        ? view.activeCountClass
+                                        : 'text-[var(--text-dim)]'}"
+                                >
+                                    {count}
+                                </span>
+                            {/if}
+                        </Button>
+                    {/each}
                 </div>
 
                 <!-- The notes section's header + the create buttons -->

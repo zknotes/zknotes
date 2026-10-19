@@ -15,6 +15,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ### Changed
 
+- Warnings, errors and confirmations across the app (settings, backup and restore, the login page,
+  shared links) now share one shape and one set of colours, following the theme instead of fixed
+  reds and ambers. The storage bar on Files, Trash and Settings → Storage is one and the same
+  component, so the shares and the over-quota colour agree everywhere.
+- Files: a card or row is now selected with a real button, so the thumbnail, the title and the
+  checkbox are separate keyboard stops, and the breadcrumb in the note header can be opened with
+  the keyboard as well. A failed readable export shows its error in place instead of a browser
+  alert.
 - Settings: the "Delete Account" tab is now called "Delete vault", and its text says what it
   does — delete this vault and everything in it. On the hosted service the account that owns the
   vault is a separate thing and is deleted separately; on a self-hosted instance the vault is the

@@ -11,9 +11,10 @@ import {
     ShieldCheck,
     Trash2,
 } from "lucide-svelte";
-import { SettingsCard } from "$lib/core/ui";
+import { Callout, SectionHeader, SettingsCard, StorageSegments } from "$lib/core/ui";
 import type { LucideIcon } from "$lib/core/types/icons";
-import { humanSize, humanSizeShort } from "$lib/core/utils/format";
+import { humanSize } from "$lib/core/utils/format";
+import { quotaSegments } from "$lib/core/utils/storage-display";
 import { loadPersistOutcome, type PersistOutcome } from "$lib/core/utils/persistent-storage";
 import Button from "$lib/core/ui/Button.svelte";
 import {
@@ -108,10 +109,7 @@ async function handleClearStorage() {
 onMount(loadStorageInfo);
 </script>
 
-<div class="mb-8">
-    <h1 class="text-2xl font-bold text-[var(--text)]">Storage Management</h1>
-    <p class="text-[var(--text-muted)] mt-1 text-sm">Manage local offline cache</p>
-</div>
+<SectionHeader title="Storage Management" description="Manage local offline cache" />
 
 <div
     class="mb-6 p-4 rounded-xl flex items-start gap-3 {persistRow.rowClass}"
@@ -142,55 +140,20 @@ onMount(loadStorageInfo);
                     <span class="font-mono text-sm">{humanSize(cloudStorage.breakdown.total_used)} / {humanSize(cloudStorage.storage_quota)}</span>
                 </div>
                 
-                {@const filesPct = cloudStorage.storage_quota > 0 ? (cloudStorage.breakdown.files_bytes / cloudStorage.storage_quota) * 100 : 0}
-                {@const itemsPct = cloudStorage.storage_quota > 0 ? (cloudStorage.breakdown.items_bytes / cloudStorage.storage_quota) * 100 : 0}
-                {@const historyPct = cloudStorage.storage_quota > 0 ? (cloudStorage.breakdown.history_bytes / cloudStorage.storage_quota) * 100 : 0}
-                {@const trashPct = cloudStorage.storage_quota > 0 ? (cloudStorage.breakdown.trashed_bytes / cloudStorage.storage_quota) * 100 : 0}
                 {@const isOverLimit = cloudStorage.breakdown.total_used > cloudStorage.storage_quota}
-
-                <div class="w-full bg-[var(--stroke)] rounded-full h-3 mb-4 flex overflow-hidden">
-                    <div class="h-full transition-all {isOverLimit ? 'bg-red-500' : 'bg-blue-500'}" style="width: {filesPct}%"></div>
-                    <div class="h-full transition-all {isOverLimit ? 'bg-red-500' : 'bg-brand0'}" style="width: {itemsPct}%"></div>
-                    <div class="h-full transition-all {isOverLimit ? 'bg-red-500' : 'bg-purple-500'}" style="width: {historyPct}%"></div>
-                    <div class="h-full transition-all bg-amber-500/60" style="width: {trashPct}%"></div>
-                </div>
-                
-                <div class="grid grid-cols-2 gap-y-3 gap-x-4 text-sm">
-                    <div class="flex items-center justify-between">
-                        <div class="flex items-center gap-2">
-                            <div class="w-3 h-3 rounded-full bg-blue-500"></div>
-                            <span class="text-[var(--text-muted)]">Files</span>
-                        </div>
-                        <span class="font-mono">{humanSizeShort(cloudStorage.breakdown.files_bytes)}</span>
-                    </div>
-                    <div class="flex items-center justify-between">
-                        <div class="flex items-center gap-2">
-                            <div class="w-3 h-3 rounded-full bg-brand0"></div>
-                            <span class="text-[var(--text-muted)]">Notes</span>
-                        </div>
-                        <span class="font-mono">{humanSizeShort(cloudStorage.breakdown.items_bytes)}</span>
-                    </div>
-                    <div class="flex items-center justify-between">
-                        <div class="flex items-center gap-2">
-                            <div class="w-3 h-3 rounded-full bg-purple-500"></div>
-                            <span class="text-[var(--text-muted)]">History</span>
-                        </div>
-                        <span class="font-mono">{humanSizeShort(cloudStorage.breakdown.history_bytes)}</span>
-                    </div>
-                    <div class="flex items-center justify-between">
-                        <div class="flex items-center gap-2">
-                            <div class="w-3 h-3 rounded-full bg-amber-500/60"></div>
-                            <span class="text-[var(--text-muted)]">Trash</span>
-                        </div>
-                        <span class="font-mono">{humanSizeShort(cloudStorage.breakdown.trashed_bytes)}</span>
-                    </div>
-                </div>
+                <StorageSegments
+                    segments={quotaSegments(cloudStorage.breakdown, cloudStorage.breakdown.trashed_bytes)}
+                    quota={cloudStorage.storage_quota}
+                    height="md"
+                    overLimit={isOverLimit}
+                    legend
+                />
                 
                 {#if isOverLimit}
-                    <div class="mt-4 p-3 bg-red-500/10 border border-red-500/20 text-red-500 rounded-xl text-sm">
-                        <strong class="block mb-1">Storage limit exceeded</strong> 
+                    <Callout size="sm" class="mt-4">
+                        <strong class="block mb-1">Storage limit exceeded</strong>
                         Uploads and modifications are blocked. Empty your trash to free up space.
-                    </div>
+                    </Callout>
                 {/if}
             {/if}
         </div>
@@ -216,31 +179,18 @@ onMount(loadStorageInfo);
                     It varies by browser, free disk space, and whether storage is persistent.
                 </p>
                 
-                {@const filesPct = storageEstimate.quota > 0 ? (storageUsage / storageEstimate.quota) * 100 : 0}
-                {@const otherPct = storageEstimate.quota > 0 ? (((storageEstimate.usage || 0) - storageUsage) / storageEstimate.quota) * 100 : 0}
+                {@const otherBytes = Math.max(0, (storageEstimate.usage || 0) - storageUsage)}
                 {@const isOverLimit = (storageEstimate.usage || 0) > storageEstimate.quota * 0.9}
-
-                <div class="w-full bg-[var(--stroke)] rounded-full h-3 mb-4 flex overflow-hidden">
-                    <div class="h-full transition-all {isOverLimit ? 'bg-red-500' : 'bg-blue-500'}" style="width: {filesPct}%"></div>
-                    <div class="h-full transition-all {isOverLimit ? 'bg-red-500/60' : 'bg-gray-400'}" style="width: {otherPct}%"></div>
-                </div>
-                
-                <div class="grid grid-cols-2 gap-y-3 gap-x-4 text-sm">
-                    <div class="flex items-center justify-between">
-                        <div class="flex items-center gap-2">
-                            <div class="w-3 h-3 rounded-full bg-blue-500"></div>
-                            <span class="text-[var(--text-muted)]">Files</span>
-                        </div>
-                        <span class="font-mono">{humanSizeShort(storageUsage)}</span>
-                    </div>
-                    <div class="flex items-center justify-between">
-                        <div class="flex items-center gap-2">
-                            <div class="w-3 h-3 rounded-full bg-gray-400"></div>
-                            <span class="text-[var(--text-muted)]">Other Data</span>
-                        </div>
-                        <span class="font-mono">{humanSizeShort(Math.max(0, (storageEstimate.usage || 0) - storageUsage))}</span>
-                    </div>
-                </div>
+                <StorageSegments
+                    segments={[
+                        { label: "Files", bytes: storageUsage, className: "bg-blue-500" },
+                        { label: "Other data", bytes: otherBytes, className: "bg-gray-400" },
+                    ]}
+                    quota={storageEstimate.quota}
+                    height="md"
+                    overLimit={isOverLimit}
+                    legend
+                />
             {:else}
                 <div class="flex items-center justify-between">
                     <span class="font-semibold text-[var(--text)]">Local files usage</span>
@@ -249,20 +199,20 @@ onMount(loadStorageInfo);
             {/if}
         </div>
 
-        <div class="p-4 bg-amber-500/10 border border-amber-500/20 text-amber-500 rounded-xl text-sm">
+        <Callout variant="warning" tone="plain">
             <strong class="block mb-1">Free up space</strong>
             Clears cached files that aren't kept on this device. Files you keep on this device and pending uploads are not affected.
-        </div>
+        </Callout>
 
         <div class="pt-2 flex flex-col items-start gap-3">
             <Button
                 variant="primary"
                 size="lg"
                 onclick={handleClearStorage}
-                disabled={isClearingStorage || storageUsage === 0}
+                loading={isClearingStorage}
+                disabled={storageUsage === 0}
             >
                 {#if isClearingStorage}
-                    <Loader2 class="w-4 h-4 animate-spin" />
                     <span>Clearing...</span>
                 {:else}
                     <Trash2 class="w-4 h-4" />

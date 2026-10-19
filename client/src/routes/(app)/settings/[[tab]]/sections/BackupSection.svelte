@@ -15,7 +15,7 @@ import { APP_EVENTS } from "$lib/core/constants/events";
 import { QUERY_KEYS } from "$lib/core/constants/query-keys";
 import { pushPendingMutations } from "$lib/core/sync";
 import { syncStore } from "$lib/core/sync/store.svelte";
-import { SettingsCard } from "$lib/core/ui";
+import { Callout, SectionHeader, SettingsCard } from "$lib/core/ui";
 import Button from "$lib/core/ui/Button.svelte";
 import { humanSize } from "$lib/core/utils/format";
 import {
@@ -37,6 +37,8 @@ let importFileInputRef = $state<HTMLInputElement>();
 // ── Readable export (HTML or Markdown) ────────────────────────────────────────────────────
 let exportingHtml = $state(false);
 let exportHtmlMsg = $state("");
+// The last readable-export failure, shown in place rather than as a browser alert.
+let exportError = $state("");
 /** The readable format last asked for: the one waiting behind the download notice, or running. */
 let readableFormat = $state<"html" | "markdown">("html");
 const runningFormat = $derived(exportingHtml ? readableFormat : null);
@@ -217,6 +219,7 @@ async function runReadableExport(format: "html" | "markdown", downloadAccepted =
     exportHtmlSkipped = [];
     exportingHtml = true;
     exportHtmlMsg = "Decrypting…";
+    exportError = "";
     const options = {
         includeFiles: htmlExportIncludeFiles,
         onProgress: (p: { phase: "notes" | "files" | "zipping"; done: number; total: number }) => {
@@ -234,7 +237,7 @@ async function runReadableExport(format: "html" | "markdown", downloadAccepted =
             exportHtmlSkipped = (await exportMarkdown(options)).skipped;
         }
     } catch (e: unknown) {
-        if (!isBackupAborted(e)) alert(e instanceof Error ? e.message : "Export failed");
+        if (!isBackupAborted(e)) exportError = e instanceof Error ? e.message : "Export failed";
     } finally {
         exportingHtml = false;
         exportHtmlMsg = "";
@@ -476,11 +479,8 @@ onMount(() => {
 
 {#snippet downloadNoticeBox(missing: MissingFiles | null, continueLabel: string, onContinue: () => void)}
     {#if missing}
-        <div
-            class="p-4 bg-[var(--warning)]/10 text-sm rounded-xl border border-[var(--warning)]/20 space-y-3"
-            data-testid="export-download-notice"
-        >
-            <p class="text-[var(--text)]">
+        <Callout variant="warning" tone="plain" class="space-y-3" data-testid="export-download-notice">
+            <p>
                 {missing.count} {missing.count === 1 ? "file is" : "files are"} not on this device
                 ({humanSize(missing.bytes)}) and will be downloaded first. Nothing is kept on the device
                 afterwards.
@@ -489,16 +489,13 @@ onMount(() => {
                 <Button variant="primary" size="lg" onclick={onContinue}>{continueLabel}</Button>
                 <Button variant="normal" size="lg" onclick={() => (downloadNotice = null)}>Cancel</Button>
             </div>
-        </div>
+        </Callout>
     {/if}
 {/snippet}
 
 {#snippet skippedSummary(items: SkippedItem[], what: string)}
-    <div
-        class="p-4 mb-4 bg-[var(--warning)]/10 text-sm rounded-xl border border-[var(--warning)]/20"
-        data-testid="export-skipped"
-    >
-        <p class="font-medium text-[var(--text)]">
+    <Callout variant="warning" tone="plain" class="mb-4" data-testid="export-skipped">
+        <p class="font-medium">
             The {what} was saved without {items.length} {items.length === 1 ? "item" : "items"} that
             could not be read: {describeSkipped(items)}.
         </p>
@@ -510,13 +507,10 @@ onMount(() => {
                 {/each}
             </ul>
         </details>
-    </div>
+    </Callout>
 {/snippet}
 
-<div class="mb-8">
-    <h1 class="text-2xl font-bold text-[var(--text)]">Backup & Export</h1>
-    <p class="text-[var(--text-muted)] mt-1 text-sm">Save and restore your encrypted data</p>
-</div>
+<SectionHeader title="Backup & Export" description="Save and restore your encrypted data" />
 
 <div class="divide-y divide-[var(--stroke)]" data-testid="backup-cards">
     <SettingsCard
@@ -549,7 +543,7 @@ onMount(() => {
                     Choose a passphrase to encrypt this backup. You'll need it to restore — it is independent of your account password and <strong>cannot be recovered if lost</strong>.
                 </p>
                 {#if encBackupError}
-                    <div class="p-3 bg-[var(--danger)]/10 text-[var(--danger)] text-sm rounded-xl border border-[var(--danger)]/20 font-medium">{encBackupError}</div>
+                    <Callout size="sm">{encBackupError}</Callout>
                 {/if}
                 <form onsubmit={(e) => { e.preventDefault(); startEncryptedBackup(); }} class="space-y-3">
                     <input type="text" autocomplete="username" class="hidden" value="zknotes-backup" aria-hidden="true" />
@@ -619,18 +613,12 @@ onMount(() => {
         {/snippet}
         <div class="space-y-5">
             {#if zipImportError}
-                <div class="p-4 bg-[var(--danger)]/10 text-[var(--danger)] text-sm rounded-xl border border-[var(--danger)]/20 font-medium">
-                    {zipImportError}
-                </div>
+                <Callout>{zipImportError}</Callout>
             {/if}
             {#if restoreResult === "done"}
-                <div
-                    class="p-4 bg-brand0/10 text-brand0 text-sm rounded-xl border border-brand0/20 font-medium flex items-center gap-2"
-                    data-testid="restore-complete"
-                >
-                    <span class="text-xl">✅</span>
-                    <span>Restore complete. This device now matches the server.</span>
-                </div>
+                <Callout variant="success" icon data-testid="restore-complete">
+                    Restore complete. This device now matches the server.
+                </Callout>
             {/if}
 
             <!-- One picker for both the first selection and "Continue": two inputs bound to the same
@@ -685,15 +673,7 @@ onMount(() => {
                         <Button
                             variant="danger"
                             size="lg"
-                            onclick={async () => {
-                                const { abortActiveRestore, loadPersistedRestore } = await import("$lib/modules/export/restore-wizard");
-                                if (restoreSession) await abortActiveRestore(restoreSession.sessionId);
-                                else {
-                                    const p = await loadPersistedRestore();
-                                    if (p) await abortActiveRestore(p.restore_session_id);
-                                }
-                                resetImport();
-                            }}
+                            onclick={() => void cancelRestore()}
                         >
                             Abandon restore
                         </Button>
@@ -769,10 +749,10 @@ onMount(() => {
                     <Button variant="normal" size="lg" onclick={() => (zipImportState = "summary")}>Back</Button>
                 </div>
             {:else if zipImportState === "dirty"}
-                <div class="p-4 bg-[var(--warning)]/10 text-[var(--warning)] text-sm rounded-xl border border-[var(--warning)]/20">
+                <Callout variant="warning">
                     Restore reached the server, but this device had unsynced notes created during the restore
                     ({restoreLeftover.length}). Those notes were kept. Sync them, then refresh to see the restored vault.
-                </div>
+                </Callout>
             {:else if zipImportState === "mode_select" || zipImportState === "summary"}
                 <div class="p-5 border border-brand0/20 bg-brand0/5 rounded-2xl space-y-4">
                     <div class="flex items-start gap-3">
@@ -873,13 +853,13 @@ onMount(() => {
         {#snippet icon()}
             <Download class="w-6 h-6" />
         {/snippet}
-        <div class="p-4 bg-amber-500/10 text-amber-500/90 text-sm rounded-xl border border-amber-500/20 font-medium mb-6 flex gap-3 items-start">
-            <span class="text-lg">⚠️</span>
-            <div>
-                <strong class="block text-amber-500 mb-1">A readable export writes your decrypted notes to disk.</strong>
-                The files are <strong>not encrypted</strong>: anyone with access to your Downloads folder, OS search index, or a synced cloud Downloads can read them. Delete them after use, or prefer an encrypted backup.
-            </div>
-        </div>
+        <Callout variant="warning" tone="plain" icon class="mb-6">
+            <strong class="block mb-1">A readable export writes your decrypted notes to disk.</strong>
+            The files are <strong>not encrypted</strong>: anyone with access to your Downloads folder, OS search index, or a synced cloud Downloads can read them. Delete them after use, or prefer an encrypted backup.
+        </Callout>
+        {#if exportError}
+            <Callout class="mb-6">{exportError}</Callout>
+        {/if}
 
         <div class="mb-6 space-y-2.5">
             <label class="flex items-center gap-3 text-sm text-[var(--text-muted)]">

@@ -55,6 +55,23 @@ $effect(() => {
 });
 </script>
 
+{#snippet tabLink(tab: (typeof tabs)[number], compact: boolean)}
+    {@const Icon = tab.icon}
+    <a
+        href={tabHref(tab.id)}
+        class="flex items-center rounded-xl text-sm font-medium transition-all
+            {compact ? 'gap-2 px-3 py-2 whitespace-nowrap shrink-0' : 'gap-3 px-3 py-2.5 text-left w-full'}
+            {activeTab === tab.id
+                ? tab.id === 'delete-account'
+                    ? 'bg-[var(--danger)]/10 text-[var(--danger)]'
+                    : 'bg-[var(--accent-color)]/10 text-[var(--accent-color)]'
+                : 'text-[var(--text-muted)] hover:bg-[var(--surface-raised)] hover:text-[var(--text)]'}"
+    >
+        <Icon class="w-4 h-4 shrink-0" />
+        {tab.label}
+    </a>
+{/snippet}
+
 <div class="h-full flex flex-col relative">
     <!-- The mobile header: close + the tabs in one shrink-0 block (the content does not scroll underneath) -->
     <header
@@ -65,20 +82,7 @@ $effect(() => {
         </div>
         <nav class="px-2 py-2 flex gap-1 overflow-x-auto">
             {#each tabs as tab}
-                {@const isActive = activeTab === tab.id}
-                {@const Icon = tab.icon}
-                <a
-                    href={tabHref(tab.id)}
-                    class="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition-all whitespace-nowrap shrink-0
-                        {isActive
-                            ? tab.id === 'delete-account'
-                                ? 'bg-[var(--danger)]/10 text-[var(--danger)]'
-                                : 'bg-[var(--accent-color)]/10 text-[var(--accent-color)]'
-                            : 'text-[var(--text-muted)] hover:bg-[var(--surface-raised)] hover:text-[var(--text)]'}"
-                >
-                    <Icon class="w-4 h-4 shrink-0" />
-                    {tab.label}
-                </a>
+                {@render tabLink(tab, true)}
             {/each}
         </nav>
     </header>
@@ -97,20 +101,7 @@ $effect(() => {
                 Settings
             </p>
             {#each tabs as tab}
-                {@const isActive = activeTab === tab.id}
-                {@const Icon = tab.icon}
-                <a
-                    href={tabHref(tab.id)}
-                    class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all text-left w-full
-                        {isActive
-                            ? tab.id === 'delete-account'
-                                ? 'bg-[var(--danger)]/10 text-[var(--danger)]'
-                                : 'bg-[var(--accent-color)]/10 text-[var(--accent-color)]'
-                            : 'text-[var(--text-muted)] hover:bg-[var(--surface-raised)] hover:text-[var(--text)]'}"
-                >
-                    <Icon class="w-4 h-4 shrink-0" />
-                    {tab.label}
-                </a>
+                {@render tabLink(tab, false)}
             {/each}
         </nav>
 

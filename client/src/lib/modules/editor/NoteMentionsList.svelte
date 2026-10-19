@@ -3,10 +3,12 @@ import { FileText } from "lucide-svelte";
 import Button from "$lib/core/ui/Button.svelte";
 import { EmptyState, ItemTitle } from "$lib/core/ui";
 
-let { items = [], command } = $props<{
+interface Props {
     items: Array<{ id: string; title: string; icon?: string; color?: string }>;
     command: (item: { id: string; label: string }) => void;
-}>();
+}
+
+let { items = [], command }: Props = $props();
 
 let selectedIndex = $state(0);
 

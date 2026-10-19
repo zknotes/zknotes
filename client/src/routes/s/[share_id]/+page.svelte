@@ -6,6 +6,7 @@ import { viewProofB64FromFragmentKey } from "@zknotes/shared";
 import type { ShareAttachmentWire } from "$lib/core/api/shares";
 import { getShareMeta, viewShare } from "$lib/core/api/shares";
 import Button from "$lib/core/ui/Button.svelte";
+import Callout from "$lib/core/ui/Callout.svelte";
 import LegalFooter from "$lib/core/ui/LegalFooter.svelte";
 import { sanitizeShareHtml } from "$lib/core/utils/dompurify";
 import { pageTitle } from "$lib/core/utils/page-title";
@@ -391,10 +392,10 @@ async function handleDownloadAttachment(att: ShareAttachmentWire) {
             {/if}
         {:else if !note}
             {#if meta.oneTime}
-                <div class="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm mb-6">
+                <Callout variant="warning" tone="plain" class="mb-6">
                     This link will stop working after you view it. If the page fails to load, the
                     content may be lost.
-                </div>
+                </Callout>
             {/if}
 
             {#if !readShareFragmentKey()}
@@ -459,10 +460,10 @@ async function handleDownloadAttachment(att: ShareAttachmentWire) {
             {/if}
         {:else}
             {#if burnGraceSec != null && attachments.length > 0}
-                <div class="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm mb-6">
+                <Callout variant="warning" tone="plain" class="mb-6">
                     This one-time link has now been used. Attachments stay downloadable for about
                     {Math.round(burnGraceSec / 60)} more minutes — save what you need now.
-                </div>
+                </Callout>
             {/if}
             <h1 class="text-3xl font-bold mb-6">{note.title || "Untitled"}</h1>
             <!-- eslint-disable-next-line svelte/no-at-html-tags — sanitizeShareHtml (stricter: no remote img or style) -->

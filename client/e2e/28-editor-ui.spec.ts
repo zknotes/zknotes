@@ -427,7 +427,7 @@ test.describe("Editor UI", () => {
         await page.waitForURL(/\/note\//, { timeout: 10_000 });
         const header = page.locator(".h-12.border-b").first();
         const folderCrumb = header
-            .locator(`span[title="Click for options"]`, { hasText: folderName })
+            .locator(`[title="Click for options"]`, { hasText: folderName })
             .first();
         await folderCrumb.click();
 

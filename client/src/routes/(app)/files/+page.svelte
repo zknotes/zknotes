@@ -1,7 +1,7 @@
 <script lang="ts">
 import type { StorageInfo } from "$lib/core/api/files";
 import { createQuery, useQueryClient } from "@tanstack/svelte-query";
-import { ChevronDown, FileImage, FolderClosed, Loader2, RefreshCw, Trash2, X } from "lucide-svelte";
+import { ChevronDown, FileImage, FolderClosed, RefreshCw, Trash2, X } from "lucide-svelte";
 import { onMount } from "svelte";
 import { goto, replaceState } from "$app/navigation";
 import { page } from "$app/state";
@@ -27,6 +27,7 @@ import {
     CollectionEmptyState,
     PageHeader,
     SegmentedControl,
+    StorageSegments,
     ToolbarSearch,
     UtilityCloseButton,
 } from "$lib/core/ui";
@@ -35,7 +36,11 @@ import FileDetailPanel from "$lib/modules/files/FileDetailPanel.svelte";
 import { FileService } from "$lib/modules/files/file-service";
 import NotePickerModal from "$lib/modules/files/NotePickerModal.svelte";
 import VirtualFiles, { type VirtualItem } from "$lib/modules/files/VirtualFiles.svelte";
-import { effectiveTrashedBytes, localTrashedFileBytes } from "$lib/core/utils/storage-display";
+import {
+    effectiveTrashedBytes,
+    localTrashedFileBytes,
+    quotaSegments,
+} from "$lib/core/utils/storage-display";
 
 const queryClient = useQueryClient();
 
@@ -335,20 +340,14 @@ const headerTitle = $derived(
             </div>
         {:else}
             {@const effTrashed = effectiveTrashedBytes(storage.breakdown.trashed_bytes, trashSize)}
-            {@const filesPct = storage.storage_quota > 0 ? Math.min(100, (storage.breakdown.files_bytes / storage.storage_quota) * 100) : 0}
-            {@const itemsPct = storage.storage_quota > 0 ? Math.min(100, (storage.breakdown.items_bytes / storage.storage_quota) * 100) : 0}
-            {@const historyPct = storage.storage_quota > 0 ? Math.min(100, (storage.breakdown.history_bytes / storage.storage_quota) * 100) : 0}
-            {@const trashPct = storage.storage_quota > 0 ? Math.min(100, (effTrashed / storage.storage_quota) * 100) : 0}
-            {@const isOverLimit = filesPct + itemsPct + historyPct + trashPct > 90}
+            {@const usedBytes = storage.breakdown.files_bytes + storage.breakdown.items_bytes + storage.breakdown.history_bytes + effTrashed}
+            {@const isOverLimit = storage.storage_quota > 0 && usedBytes / storage.storage_quota > 0.9}
             <div>
-                <div class="h-1.5 w-full bg-[var(--surface-raised)] rounded-full overflow-hidden flex">
-                    <div class="h-full transition-all {isOverLimit ? 'bg-red-500' : 'bg-blue-500'}" style="width: {filesPct}%" title="Files: {humanSizeShort(storage.breakdown.files_bytes)}"></div>
-                    <div class="h-full transition-all {isOverLimit ? 'bg-red-500' : 'bg-brand0'}" style="width: {itemsPct}%" title="Notes & Folders: {humanSizeShort(storage.breakdown.items_bytes)}"></div>
-                    <div class="h-full transition-all {isOverLimit ? 'bg-red-500' : 'bg-purple-500'}" style="width: {historyPct}%" title="History: {humanSizeShort(storage.breakdown.history_bytes)}"></div>
-                    {#if trashPct > 0}
-                        <div class="h-full bg-amber-500/60 transition-all" style="width: {trashPct}%" title="Trash: {humanSizeShort(effTrashed)}"></div>
-                    {/if}
-                </div>
+                <StorageSegments
+                    segments={quotaSegments(storage.breakdown, effTrashed)}
+                    quota={storage.storage_quota}
+                    overLimit={isOverLimit}
+                />
                 <div class="flex items-center gap-2 mt-1">
                     <span class="text-xs font-mono text-[var(--text-dim)]">{humanSizeShort(storage.breakdown.total_used)} / {humanSizeShort(storage.storage_quota)} used</span>
                     <Button variant="ghost" size="sm" aria-label="Refresh storage" onclick={refreshStorage} class="!p-1 !h-auto !min-w-0" title="Refresh storage usage">
@@ -379,10 +378,10 @@ const headerTitle = $derived(
                         size="sm"
                         class="flex-shrink-0"
                         onclick={deleteSelected}
-                        disabled={deleting}
+                        loading={deleting}
                     >
                         {#if deleting}
-                            <Loader2 class="w-[0.8125rem] h-[0.8125rem] animate-spin" /> Moving…
+                            Moving…
                         {:else}
                             <Trash2 class="w-[0.8125rem] h-[0.8125rem]" /> Move to trash ({selectedIds.size})
                         {/if}

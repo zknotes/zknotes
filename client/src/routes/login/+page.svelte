@@ -1,5 +1,5 @@
 <script lang="ts">
-import { ArrowRight, Eye, EyeOff, KeyRound, Loader2, Mail, WifiOff } from "lucide-svelte";
+import { ArrowRight, Eye, EyeOff, KeyRound, Mail, WifiOff } from "lucide-svelte";
 import { onMount } from "svelte";
 import { Toggle } from "bits-ui";
 import { goto } from "$app/navigation";
@@ -9,6 +9,7 @@ import { isServerUnreachableError } from "$lib/core/api/client";
 import { ServerReachability } from "$lib/core/api/server-reachability.svelte";
 import { authStore } from "$lib/core/stores/auth-store.svelte";
 import Button from "$lib/core/ui/Button.svelte";
+import Callout from "$lib/core/ui/Callout.svelte";
 import LegalFooter from "$lib/core/ui/LegalFooter.svelte";
 import {
     type LoginStage,
@@ -316,22 +317,16 @@ const unsyncedSummary = $derived.by(() => {
             {/if}
 
             {#if accountLocked}
-                <div class="bg-rose-500/10 text-rose-300 text-sm p-3 rounded-md border border-rose-500/20 flex items-start gap-2">
-                    <div class="w-1.5 h-1.5 rounded-full bg-rose-400 flex-shrink-0 mt-1.5"></div>
-                    <span>
-                        Your account has been locked. Please
-                        {#if contactUrl}
-                            <a href={contactUrl} class="underline text-rose-200 hover:text-rose-100">contact support</a>.
-                        {:else}
-                            contact support.
-                        {/if}
-                    </span>
-                </div>
+                <Callout size="sm">
+                    Your account has been locked. Please
+                    {#if contactUrl}
+                        <a href={contactUrl} class="underline">contact support</a>.
+                    {:else}
+                        contact support.
+                    {/if}
+                </Callout>
             {:else if error}
-                <div class="bg-rose-500/10 text-rose-300 text-sm p-3 rounded-md border border-rose-500/20 flex items-center gap-2">
-                    <div class="w-1.5 h-1.5 rounded-full bg-rose-400 flex-shrink-0"></div>
-                    {error}
-                </div>
+                <Callout size="sm">{error}</Callout>
             {/if}
 
             {#if unsyncedGate}
@@ -358,12 +353,12 @@ const unsyncedSummary = $derived.by(() => {
                             <Button
                                 variant="primary"
                                 type="button"
-                                disabled={draining || loading}
+                                loading={draining}
+                                disabled={loading}
                                 class="w-full"
                                 onclick={() => void syncThenContinue()}
                             >
                                 {#if draining}
-                                    <Loader2 class="w-4 h-4 animate-spin" />
                                     Syncing…
                                 {:else}
                                     Sync then continue
@@ -431,11 +426,10 @@ const unsyncedSummary = $derived.by(() => {
                 <Button
                     variant="primary"
                     type="submit"
-                    disabled={loading}
+                    {loading}
                     class="w-full h-11 text-sm font-semibold shadow-lg shadow-brand0/20 group active:scale-[0.98]"
                 >
                     {#if loading}
-                        <Loader2 class="w-4 h-4 animate-spin" />
                         {busyLabel}
                     {:else}
                         Unlock vault

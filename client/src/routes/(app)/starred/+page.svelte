@@ -1,14 +1,14 @@
 <script lang="ts">
 import { runWithToast } from "$lib/core/stores/toast.svelte";
 import { createQuery, useQueryClient } from "@tanstack/svelte-query";
-import { CornerDownRight, FileText, Home, Shield, Star } from "lucide-svelte";
+import { FileText, Shield, Star } from "lucide-svelte";
 import { goto } from "$app/navigation";
 import { QUERY_KEYS } from "$lib/core/constants/query-keys";
 import { treeItemsQueryOptions } from "$lib/core/data/item-queries";
 import { folderPathLabel } from "$lib/core/data/items";
 import { ItemService } from "$lib/core/services/item-service";
 import Button from "$lib/core/ui/Button.svelte";
-import { CollectionEmptyState, PageHeader, UtilityCloseButton } from "$lib/core/ui";
+import { CollectionEmptyState, LocationMeta, PageHeader, UtilityCloseButton } from "$lib/core/ui";
 import CollectionList from "$lib/core/ui/CollectionList.svelte";
 import CollectionListRow from "$lib/core/ui/CollectionListRow.svelte";
 import CollectionListSkeleton from "$lib/core/ui/CollectionListSkeleton.svelte";
@@ -75,17 +75,7 @@ async function unstar(id: string) {
                         onclick={() => goto(`/note/${note.id}`)}
                     >
                         {#snippet subtitle()}
-                            <div
-                                class="flex items-center gap-1 text-2xs font-mono text-[var(--text-dim)] mt-0.5 min-w-0 max-w-full truncate"
-                                title={path}
-                            >
-                                {#if note.parent_id}
-                                    <CornerDownRight class="w-[0.625rem] h-[0.625rem] flex-shrink-0" />
-                                {:else}
-                                    <Home class="w-[0.625rem] h-[0.625rem] flex-shrink-0" />
-                                {/if}
-                                <span class="truncate">{path}</span>
-                            </div>
+                            <LocationMeta label={path} root={!note.parent_id} />
                         {/snippet}
                         {#snippet trailing()}
                             <span class="text-xs font-mono text-[var(--text-dim)]">{relativeTime(note.updated_at)}</span>

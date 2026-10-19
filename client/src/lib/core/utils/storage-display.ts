@@ -35,3 +35,29 @@ export async function localTrashedFileBytes(): Promise<number> {
 export function effectiveTrashedBytes(_apiTrashed: number, localFileTrashBytes: number): number {
     return localFileTrashBytes;
 }
+
+/** One share of the storage bar (`StorageSegments`). */
+export interface StorageSegment {
+    label: string;
+    bytes: number;
+    /** The Tailwind background class of the segment. */
+    className: string;
+    /** Keep the colour when the bar paints the others in the danger colour (the trash share). */
+    keepColor?: boolean;
+}
+
+/**
+ * The four quota shares in the order and colours every bar uses. `trashedBytes` is passed in
+ * separately because the pages prefer the live local figure over the API's (`effectiveTrashedBytes`).
+ */
+export function quotaSegments(
+    breakdown: { files_bytes: number; items_bytes: number; history_bytes: number },
+    trashedBytes: number,
+): StorageSegment[] {
+    return [
+        { label: "Files", bytes: breakdown.files_bytes, className: "bg-blue-500" },
+        { label: "Notes", bytes: breakdown.items_bytes, className: "bg-brand0" },
+        { label: "History", bytes: breakdown.history_bytes, className: "bg-purple-500" },
+        { label: "Trash", bytes: trashedBytes, className: "bg-amber-500/60", keepColor: true },
+    ];
+}

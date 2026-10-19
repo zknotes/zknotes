@@ -1,7 +1,7 @@
 <script lang="ts">
 import { Info, Shield } from "lucide-svelte";
 import { onMount } from "svelte";
-import { SettingsCard } from "$lib/core/ui";
+import { Callout, SectionHeader, SettingsCard } from "$lib/core/ui";
 import Button from "$lib/core/ui/Button.svelte";
 import { loadInstancePublicConfig } from "$lib/core/constants/public-www";
 import { pwaStore } from "$lib/core/stores";
@@ -20,21 +20,15 @@ onMount(() => {
 });
 </script>
 
-<div class="mb-8">
-    <h1 class="text-2xl font-bold text-[var(--text)]">About</h1>
-    <p class="text-[var(--text-muted)] mt-1 text-sm">Version, links, and account details</p>
-</div>
+<SectionHeader title="About" description="Version, links, and account details" />
 
 <div class="space-y-6">
     {#if typeof window !== "undefined" && !window.SharedWorker}
-        <div class="p-4 bg-amber-500/10 border border-amber-500/20 text-amber-500 rounded-xl flex items-start gap-3">
-            <span class="text-xl">⚠️</span>
-            <div class="text-sm">
-                <strong class="block mb-1">Browser compatibility notice</strong>
-                Your browser does not support background processes (SharedWorker). Due to the zero-knowledge architecture,
-                <strong>you will need to log in again after every page refresh.</strong>
-            </div>
-        </div>
+        <Callout variant="warning" tone="plain" icon>
+            <strong class="block mb-1">Browser compatibility notice</strong>
+            Your browser does not support background processes (SharedWorker). Due to the zero-knowledge architecture,
+            <strong>you will need to log in again after every page refresh.</strong>
+        </Callout>
     {/if}
 
     <div class="divide-y divide-[var(--stroke)]">

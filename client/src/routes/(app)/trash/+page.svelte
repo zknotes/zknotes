@@ -27,6 +27,7 @@ import {
     type PathSegment,
 } from "$lib/core/data/items";
 import Button from "$lib/core/ui/Button.svelte";
+import StorageSegments from "$lib/core/ui/StorageSegments.svelte";
 import Dialog from "$lib/core/ui/Dialog.svelte";
 import DialogActions from "$lib/core/ui/DialogActions.svelte";
 import {
@@ -380,15 +381,11 @@ async function confirmDestructiveAction() {
             </div>
         {:else}
             {@const effTrashed = effectiveTrashedBytes(storage.breakdown.trashed_bytes, trashSize)}
-            {@const trashPct = storage.storage_quota > 0 ? Math.min(100, (effTrashed / storage.storage_quota) * 100) : 0}
             <div class="mb-4">
-                <div class="h-1.5 w-full bg-[var(--surface-raised)] rounded-full overflow-hidden">
-                    <div
-                        class="h-full bg-[var(--text-muted)] transition-all"
-                        style="width: {trashPct}%"
-                        title="Trash: {humanSizeShort(effTrashed)}"
-                    ></div>
-                </div>
+                <StorageSegments
+                    segments={[{ label: "Trash", bytes: effTrashed, className: "bg-[var(--text-muted)]" }]}
+                    quota={storage.storage_quota}
+                />
                 <div class="flex items-center gap-2 mt-1">
                     <span class="text-xs font-mono text-[var(--text-dim)]">
                         {humanSizeShort(effTrashed)} in trash

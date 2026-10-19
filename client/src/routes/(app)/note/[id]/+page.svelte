@@ -1,6 +1,6 @@
 <script lang="ts">
 import { createQuery, keepPreviousData, useQueryClient } from "@tanstack/svelte-query";
-import { PenLine, RefreshCw } from "lucide-svelte";
+import { RefreshCw } from "lucide-svelte";
 import { untrack } from "svelte";
 import { beforeNavigate, goto } from "$app/navigation";
 import { page } from "$app/state";
@@ -10,7 +10,6 @@ import { treeItemsQueryOptions } from "$lib/core/data/item-queries";
 import type { DecryptedItemMeta } from "$lib/core/data/items";
 import { ItemService } from "$lib/core/services/item-service";
 import { recentNotesStore } from "$lib/core/stores/recent-notes.svelte";
-import Button from "$lib/core/ui/Button.svelte";
 import Toast from "$lib/core/ui/Toast.svelte";
 import { globalToasts } from "$lib/core/stores/toast.svelte";
 import { devLog } from "$lib/core/utils/dev-log";
@@ -52,6 +51,8 @@ import {
     resumePendingUploads,
 } from "$lib/modules/files/editor-images";
 import FileDetailPanel from "$lib/modules/files/FileDetailPanel.svelte";
+import UploadConfirmBar from "$lib/modules/files/UploadConfirmBar.svelte";
+import NoteNotFound from "$lib/modules/notes/NoteNotFound.svelte";
 import { NoteFileEvents } from "$lib/modules/files/NoteFileEvents.svelte";
 import { pendingTrashManager } from "$lib/modules/files/pending-trash";
 import {
@@ -646,6 +647,36 @@ async function createNote() {
         isCreating = false;
     }
 }
+/** "Upload" on the confirm bar: store every blob first, then insert all the nodes in one go. */
+async function confirmQueuedUploads() {
+    // splice(0) atomically clears the reactive array AND returns a plain JS array — avoids iterating
+    // a Svelte proxy after the source is reassigned.
+    const items = fileEvents.confirmQueue.splice(0);
+    const ed = editor;
+    devLog(
+        "upload",
+        "confirm click: items=",
+        items.length,
+        items.map((i) => i.file.name),
+        "editor=",
+        !!ed,
+    );
+    if (!ed) return;
+    // Phase 1 — store all blobs to IDB in parallel (async, awaited together). Keeping all awaits
+    // BEFORE the insertions means no Svelte reactive effect can fire between individual insertions
+    // and overwrite the editor content.
+    const pendings = await Promise.all(
+        items.map((item) =>
+            preparePendingUpload(item.file, item.noteId, item.parentId).catch((e) => {
+                console.error("[upload] prepare failed:", item.file.name, e);
+                return null;
+            }),
+        ),
+    );
+    // Phase 2 — insert all nodes synchronously (no awaits between calls).
+    const validPendings = pendings.filter((p): p is NonNullable<typeof p> => p !== null);
+    if (validPendings.length > 0) insertAndStartUploads(ed, validPendings);
+}
 </script>
 
 <svelte:window
@@ -669,45 +700,7 @@ async function createNote() {
             </div>
         </div>
     {:else if noteQuery.isError || !noteQuery.data || noteQuery.data.deleted_at}
-        <div
-            class="flex-1 flex flex-col items-center justify-center text-center p-8 relative overflow-hidden fade-in"
-        >
-            <div class="relative z-10 flex flex-col items-center">
-                <div
-                    class="w-16 h-16 rounded-2xl bg-[var(--surface-raised)] border border-[var(--stroke)] flex items-center justify-center mb-4 shadow-sm text-[var(--text-dim)]"
-                >
-                    <svg
-                        width="24"
-                        height="24"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        ><path
-                            d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"
-                        /><polyline points="14 2 14 8 20 8" /><line
-                            x1="9.5"
-                            y1="12.5"
-                            x2="14.5"
-                            y2="17.5"
-                        /><line x1="14.5" y1="12.5" x2="9.5" y2="17.5" /></svg
-                    >
-                </div>
-                <h2 class="text-lg font-medium text-[var(--text-sub)] mb-1.5">
-                    Note not found
-                </h2>
-                <p class="text-[var(--text-dim)] max-w-sm text-sm mb-6">
-                    This note has been deleted or does not exist. Would you like
-                    to create a new one instead?
-                </p>
-                <Button variant="normal" onclick={createNote} disabled={isCreating} loading={isCreating}>
-                    <PenLine class="w-4 h-4" />
-                    Create new note
-                </Button>
-            </div>
-        </div>
+        <NoteNotFound onCreate={createNote} creating={isCreating} />
     {:else}
         <EditorHeader
             {breadcrumb}
@@ -828,90 +821,11 @@ async function createNote() {
 {/if}
 
 {#if fileEvents.confirmQueue.length > 0}
-    {@const queue = fileEvents.confirmQueue}
-    {@const count = queue.length}
-    <div
-        class="fixed inset-x-0 bottom-6 z-[65] flex justify-center px-4 pointer-events-none"
-    >
-        <div
-            class="pointer-events-auto flex items-center gap-3 bg-[var(--surface-panel)] border border-[var(--stroke)] rounded-xl px-4 py-3 shadow-[var(--float-shadow)] max-w-sm w-full"
-        >
-            <div class="flex-1 min-w-0">
-                {#if count === 1}
-                    {@const f = queue[0].file}
-                    {@const sizeStr =
-                        f.size < 1024 * 1024
-                            ? `${Math.round(f.size / 1024)} KB`
-                            : `${(f.size / (1024 * 1024)).toFixed(1)} MB`}
-                    <div
-                        class="text-sm font-medium text-[var(--text)] truncate"
-                    >
-                        {f.name}
-                    </div>
-                    <div class="text-xs text-[var(--text-dim)]">
-                        {sizeStr} — upload to this note?
-                    </div>
-                {:else}
-                    <div class="text-sm font-medium text-[var(--text)]">
-                        {count} files — upload to this note?
-                    </div>
-                    <div
-                        class="text-xs text-[var(--text-muted)] mt-1 space-y-0.5 max-h-20 overflow-y-auto"
-                    >
-                        {#each queue as q}
-                            <div class="truncate">{q.file.name}</div>
-                        {/each}
-                    </div>
-                {/if}
-            </div>
-            <Button onclick={() => (fileEvents.confirmQueue = [])}
-                >Cancel</Button
-            >
-            <Button
-                variant="primary"
-                onclick={async () => {
-                    // splice(0) atomically clears the reactive array AND returns a plain JS
-                    // array — avoids iterating a Svelte proxy after the source is reassigned.
-                    const items = fileEvents.confirmQueue.splice(0);
-                    const ed = editor;
-                    devLog(
-                        "upload",
-                        "confirm click: items=",
-                        items.length,
-                        items.map((i) => i.file.name),
-                        "editor=",
-                        !!ed,
-                    );
-                    if (!ed) return;
-                    // Phase 1 — store all blobs to IDB in parallel (async, awaited together).
-                    // Keeping all awaits BEFORE the insertions means no Svelte reactive effect
-                    // can fire between individual insertions and overwrite the editor content.
-                    const pendings = await Promise.all(
-                        items.map((item) =>
-                            preparePendingUpload(
-                                item.file,
-                                item.noteId,
-                                item.parentId,
-                            ).catch((e) => {
-                                console.error(
-                                    "[upload] prepare failed:",
-                                    item.file.name,
-                                    e,
-                                );
-                                return null;
-                            }),
-                        ),
-                    );
-                    // Phase 2 — insert all nodes synchronously (no awaits between calls).
-                    const validPendings = pendings.filter(
-                        (p): p is NonNullable<typeof p> => p !== null,
-                    );
-                    if (validPendings.length > 0)
-                        insertAndStartUploads(ed, validPendings);
-                }}>{count === 1 ? "Upload" : `Upload ${count}`}</Button
-            >
-        </div>
-    </div>
+    <UploadConfirmBar
+        queue={fileEvents.confirmQueue}
+        onCancel={() => (fileEvents.confirmQueue = [])}
+        onConfirm={() => void confirmQueuedUploads()}
+    />
 {/if}
 
 <div class="toast-stack z-[65]">

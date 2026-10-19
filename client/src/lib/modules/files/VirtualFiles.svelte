@@ -137,20 +137,26 @@ const visible = $derived(files.slice(startRow * cols, endRow * cols));
                             {#if !('isGroupHeader' in f)}
                                 {@const Icon = fileIcon(f.mime)}
                                 {@const checked = selectedIds.has(f.id)}
+                                <!-- The selection is a transparent button under the card's controls (siblings, not
+                                     nested), so the thumbnail, title and checkbox stay separate tab stops. -->
                                 <div
-                                    role="button"
-                                    tabindex="0"
-                                    onclick={() => onToggle(f.id)}
+                                    role="presentation"
                                     oncontextmenu={(e) => handleContextMenu(e, f)}
-                                    onkeydown={(e) => e.key === "Enter" && onToggle(f.id)}
                                     style="height: {GRID_CARD_H}px;"
-                                    class="group relative text-left bg-[var(--surface-panel)]/60 border rounded-lg p-3 sm:p-4 hover:border-[var(--stroke)] transition flex flex-col cursor-pointer select-none overflow-hidden min-w-0 {checked ? 'border-brand0/60 ring-1 ring-brand0/30 bg-brand/20' : 'border-[var(--stroke)]'}"
+                                    class="group relative text-left bg-[var(--surface-panel)]/60 border rounded-lg p-3 sm:p-4 hover:border-[var(--stroke)] transition flex flex-col select-none overflow-hidden min-w-0 {checked ? 'border-brand0/60 ring-1 ring-brand0/30 bg-brand/20' : 'border-[var(--stroke)]'}"
                                 >
-                                    <div class="flex items-start gap-2 mb-3">
-                                        <button 
-                                            class="text-left rounded overflow-hidden" 
+                                    <button
+                                        type="button"
+                                        class="absolute inset-0 cursor-pointer rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand0/50"
+                                        aria-label="{checked ? 'Deselect' : 'Select'} {f.title}"
+                                        aria-pressed={checked}
+                                        onclick={() => onToggle(f.id)}
+                                    ></button>
+                                    <div class="relative flex items-start gap-2 mb-3">
+                                        <button
+                                            class="text-left rounded overflow-hidden"
                                             title="View details"
-                                            onclick={(e) => { e.stopPropagation(); onSelect(f); }}
+                                            onclick={() => onSelect(f)}
                                         >
                                             <FileThumb fileId={f.id} mime={f.mime} icon={Icon} updatedAt={f.updated_at} />
                                         </button>
@@ -158,10 +164,10 @@ const visible = $derived(files.slice(startRow * cols, endRow * cols));
                                             <Checkbox {checked} onCheckedChange={() => onToggle(f.id)} />
                                         </div>
                                     </div>
-                                    <button 
-                                        class="text-left hover:underline mb-1 min-w-0 max-w-full"
+                                    <button
+                                        class="relative text-left hover:underline mb-1 min-w-0 max-w-full"
                                         title="View details"
-                                        onclick={(e) => { e.stopPropagation(); onSelect(f); }}
+                                        onclick={() => onSelect(f)}
                                     >
                                         <ItemTitle weight="semibold" class="leading-normal pb-[1px] text-[var(--text)] block">{f.title}</ItemTitle>
                                     </button>
@@ -196,22 +202,23 @@ const visible = $derived(files.slice(startRow * cols, endRow * cols));
                                 {@const Icon = fileIcon(f.mime)}
                                 {@const checked = selectedIds.has(f.id)}
                                 <div
-                                    role="button"
-                                    tabindex="0"
-                                    onclick={() => onToggle(f.id)}
+                                    role="presentation"
                                     oncontextmenu={(e) => handleContextMenu(e, f)}
-                                    onkeydown={(e) => e.key === "Enter" && onToggle(f.id)}
                                     style="height: {LIST_ROW_H}px;"
-                                    class="group flex items-center gap-3 px-3 border-b border-[var(--stroke)]/60 last:border-b-0 text-left hover:bg-[var(--surface-panel)]/50 transition w-full cursor-pointer select-none {checked ? 'bg-brand/20' : ''}"
+                                    class="group relative flex items-center gap-3 px-3 border-b border-[var(--stroke)]/60 last:border-b-0 text-left hover:bg-[var(--surface-panel)]/50 transition w-full select-none {checked ? 'bg-brand/20' : ''}"
                                 >
-                                    <Checkbox {checked} onCheckedChange={() => onToggle(f.id)} class="flex-shrink-0" />
                                     <button
-                                        class="flex items-center gap-3 min-w-[12rem] flex-1 overflow-hidden text-left"
+                                        type="button"
+                                        class="absolute inset-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand0/50"
+                                        aria-label="{checked ? 'Deselect' : 'Select'} {f.title}"
+                                        aria-pressed={checked}
+                                        onclick={() => onToggle(f.id)}
+                                    ></button>
+                                    <Checkbox {checked} onCheckedChange={() => onToggle(f.id)} class="relative flex-shrink-0" />
+                                    <button
+                                        class="relative flex items-center gap-3 min-w-[12rem] flex-1 overflow-hidden text-left"
                                         title="View details"
-                                        onclick={(e) => {
-                                            e.stopPropagation();
-                                            onSelect(f);
-                                        }}
+                                        onclick={() => onSelect(f)}
                                     >
                                         <FileThumb fileId={f.id} mime={f.mime} icon={Icon} updatedAt={f.updated_at} />
                                         <div class="min-w-0 flex-1 overflow-hidden">

@@ -29,6 +29,21 @@ function topicHref(id: TopicId): string {
 }
 </script>
 
+{#snippet topicLink(topic: (typeof topics)[number], compact: boolean)}
+    {@const Icon = topic.icon}
+    <a
+        href={topicHref(topic.id)}
+        class="flex items-center rounded-lg font-medium transition-colors
+            {compact ? 'gap-2 px-3 py-1.5 text-xs whitespace-nowrap shrink-0' : 'gap-2.5 px-3 py-2 text-sm text-left w-full'}
+            {activeTopic === topic.id
+                ? 'bg-brand0/10 text-brand-fg'
+                : 'text-[var(--text-muted)] hover:bg-[var(--surface-raised)] hover:text-[var(--text-sub)]'}"
+    >
+        <Icon class="{compact ? 'w-3.5 h-3.5' : 'w-4 h-4'} shrink-0" />
+        {topic.label}
+    </a>
+{/snippet}
+
 <div class="h-full flex flex-col bg-[var(--surface-panel)]">
     <header class="border-b border-[var(--stroke)] bg-[var(--float-bg)] backdrop-blur-sm sticky top-0 z-20 shrink-0">
         <div class="max-w-5xl mx-auto px-4 sm:px-6 h-12 flex items-center justify-between">
@@ -39,18 +54,7 @@ function topicHref(id: TopicId): string {
         <!-- The mobile navigation — the topics visible without an extra click (better than a dropdown for 2–6 articles) -->
         <nav class="md:hidden border-t border-[var(--stroke)] px-2 py-2 flex gap-1 overflow-x-auto">
             {#each topics as topic}
-                {@const isActive = activeTopic === topic.id}
-                {@const Icon = topic.icon}
-                <a
-                    href={topicHref(topic.id)}
-                    class="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap shrink-0
-                        {isActive
-                            ? 'bg-brand0/10 text-brand-fg'
-                            : 'text-[var(--text-muted)] hover:bg-[var(--surface-raised)] hover:text-[var(--text-sub)]'}"
-                >
-                    <Icon class="w-3.5 h-3.5 shrink-0" />
-                    {topic.label}
-                </a>
+                {@render topicLink(topic, true)}
             {/each}
         </nav>
     </header>
@@ -60,18 +64,7 @@ function topicHref(id: TopicId): string {
         <nav class="hidden md:flex w-52 shrink-0 border-r border-[var(--stroke)] pt-8 pb-6 px-3 flex-col gap-1 overflow-y-auto">
             <p class="text-2xs font-mono uppercase tracking-[0.18em] text-[var(--text-dim)] px-3 mb-3">Topics</p>
             {#each topics as topic}
-                {@const isActive = activeTopic === topic.id}
-                {@const Icon = topic.icon}
-                <a
-                    href={topicHref(topic.id)}
-                    class="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors text-left w-full
-                        {isActive
-                            ? 'bg-brand0/10 text-brand-fg'
-                            : 'text-[var(--text-muted)] hover:bg-[var(--surface-raised)] hover:text-[var(--text-sub)]'}"
-                >
-                    <Icon class="w-4 h-4 shrink-0" />
-                    {topic.label}
-                </a>
+                {@render topicLink(topic, false)}
             {/each}
         </nav>
 

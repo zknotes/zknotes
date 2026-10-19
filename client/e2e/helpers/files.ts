@@ -34,9 +34,9 @@ export function redPngBuffer(): Buffer {
     return Buffer.from(RED_PNG_B64, "base64");
 }
 
-/** A file row/card in /files (list or grid) — `role=button` + `.group`, not a pending-upload row. */
+/** A file row/card in /files (list or grid) — the `role=presentation` `.group` wrapper, not a pending-upload row. */
 export function fileCard(page: Page, name: string) {
-    return page.getByRole("main").locator('[role="button"].group', { hasText: name }).first();
+    return page.getByRole("main").locator('[role="presentation"].group', { hasText: name }).first();
 }
 
 /**

@@ -51,9 +51,9 @@ test.describe("Breadcrumbs Context Menu", () => {
         // Locate the header in the editor that holds the breadcrumbs
         const header = page.locator("header, .h-12.border-b").first(); // by the classes in EditorHeader.svelte
 
-        // The outer breadcrumb span (which has the title plus an inline colour style), not the inner title span
+        // The crumb button (which has the title plus an inline colour style), not the inner title span
         const folderCrumb = header
-            .locator(`span[title="Click for options"]`, { hasText: folderName })
+            .locator(`[title="Click for options"]`, { hasText: folderName })
             .first();
         await folderCrumb.click();
 

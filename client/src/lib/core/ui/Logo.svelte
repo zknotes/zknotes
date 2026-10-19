@@ -1,5 +1,9 @@
 <script lang="ts">
-let { class: className = "" } = $props<{ class?: string }>();
+interface Props {
+    class?: string;
+}
+
+let { class: className = "" }: Props = $props();
 </script>
 
 <div class="flex items-center gap-2 shrink-0 {className}">

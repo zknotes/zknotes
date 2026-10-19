@@ -1,14 +1,11 @@
 <script lang="ts">
 import { Check, Palette } from "lucide-svelte";
-import { SettingsCard } from "$lib/core/ui";
+import { SectionHeader, SettingsCard } from "$lib/core/ui";
 import { themeStore } from "$lib/core/stores/theme.svelte";
 import { THEME_PRESETS } from "$lib/core/constants/theme-presets";
 </script>
 
-<div class="mb-8">
-    <h1 class="text-2xl font-bold text-[var(--text)]">Appearance</h1>
-    <p class="text-[var(--text-muted)] mt-1 text-sm">Theme and visual preferences</p>
-</div>
+<SectionHeader title="Appearance" description="Theme and visual preferences" />
 
 <div class="divide-y divide-[var(--stroke)]">
     <SettingsCard title="Theme" description="Choose the color theme used across the app.">

@@ -1,9 +1,9 @@
 <script lang="ts">
-import { Loader2, Trash2 } from "lucide-svelte";
+import { Trash2 } from "lucide-svelte";
 import { onMount } from "svelte";
 import { goto } from "$app/navigation";
 import { getMe } from "$lib/core/api/auth";
-import { SettingsCard } from "$lib/core/ui";
+import { Callout, SectionHeader, SettingsCard } from "$lib/core/ui";
 import { loadInstancePublicConfig } from "$lib/core/constants/public-www";
 import { performDeleteAccount } from "$lib/core/services/auth-service";
 import {
@@ -97,10 +97,7 @@ async function deleteAccount() {
 }
 </script>
 
-<div class="mb-8">
-    <h1 class="text-2xl font-bold text-[var(--text)]">Delete vault</h1>
-    <p class="text-[var(--text-muted)] mt-1 text-sm">Permanently remove this vault and everything in it</p>
-</div>
+<SectionHeader title="Delete vault" description="Permanently remove this vault and everything in it" />
 
 <div class="divide-y divide-[var(--stroke)]">
 <SettingsCard
@@ -117,10 +114,7 @@ async function deleteAccount() {
         </p>
     {/if}
     {#if wrongVault}
-        <div
-            class="p-3 bg-[var(--danger)]/10 text-[var(--danger)] text-sm rounded-xl border border-[var(--danger)]/20 mb-3"
-            data-testid="delete-vault-mismatch"
-        >
+        <Callout size="sm" class="mb-3" data-testid="delete-vault-mismatch">
             <p>
                 You came here to delete the vault for <strong>{expectedEmail}</strong>, but this browser is
                 signed in to the vault for <strong>{vaultEmail}</strong>. Sign out, sign in to
@@ -131,12 +125,9 @@ async function deleteAccount() {
                     I came for {vaultEmail} after all
                 </Button>
             </div>
-        </div>
+        </Callout>
     {:else if unconfirmedVault && vaultEmailFailed}
-        <div
-            class="p-3 bg-[var(--danger)]/10 text-[var(--danger)] text-sm rounded-xl border border-[var(--danger)]/20 mb-3"
-            data-testid="delete-vault-unconfirmed"
-        >
+        <Callout size="sm" class="mb-3" data-testid="delete-vault-unconfirmed">
             <p>
                 You came here to delete the vault for <strong>{expectedEmail}</strong>, but we could not
                 confirm which vault this browser is signed in to, so nothing can be deleted yet.
@@ -144,7 +135,7 @@ async function deleteAccount() {
             <div class="mt-2">
                 <Button variant="normal" size="sm" onclick={() => void loadVaultEmail()}>Retry</Button>
             </div>
-        </div>
+        </Callout>
     {/if}
     {#if !showDeleteSection}
         <Button
@@ -156,7 +147,7 @@ async function deleteAccount() {
     {:else}
         <div class="space-y-4 mt-4">
             {#if deleteError}
-                <div class="p-3 bg-[var(--danger)]/10 text-[var(--danger)] text-sm rounded-xl border border-[var(--danger)]/20">{deleteError}</div>
+                <Callout size="sm">{deleteError}</Callout>
             {/if}
             <div>
                 <label for="delete-password" class="block text-sm font-medium text-[var(--text)] mb-1.5">Current password</label>
@@ -185,10 +176,11 @@ async function deleteAccount() {
                     variant="danger"
                     size="lg"
                     onclick={deleteAccount}
-                    disabled={blocked || deleteWorking || deleteConfirmText !== DELETE_CONFIRM || !deletePassword}
+                    loading={deleteWorking}
+                    disabled={blocked || deleteConfirmText !== DELETE_CONFIRM || !deletePassword}
                 >
                     {#if deleteWorking}
-                        <Loader2 class="w-4 h-4 animate-spin" /> Deleting…
+                        Deleting…
                     {:else}
                         <Trash2 class="w-4 h-4" /> Permanently delete vault
                     {/if}

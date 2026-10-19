@@ -1,59 +1,22 @@
 <script lang="ts">
 // A standalone level picker (for use outside the app menu). The same freeze session as
-// SidebarAppMenu: the size is frozen on open and counter-scaled until it closes.
+// SidebarAppMenu (`FrozenPopover`): the size is frozen on open and counter-scaled until it closes.
 import { Check, ZoomIn } from "lucide-svelte";
 import Button from "./Button.svelte";
 import { uiZoomStore } from "$lib/core/stores/ui-zoom.svelte";
 import { UI_ZOOM_LEVELS } from "$lib/core/constants/ui-zoom-levels";
+import { FrozenPopover } from "./frozen-popover.svelte";
 
-let open = $state(false);
 let wrapEl = $state<HTMLDivElement | null>(null);
-let frozenFactor = $state<number | null>(null);
-let pin = $state<{ left: number; bottom: number } | null>(null);
-
-const currentFactor = $derived.by(() => {
-    const _level = uiZoomStore.current;
-    void _level;
-    return uiZoomStore.factor;
-});
-
-const menuScale = $derived(
-    frozenFactor != null && currentFactor > 0 ? frozenFactor / currentFactor : 1,
-);
-
-function close() {
-    open = false;
-    frozenFactor = null;
-    pin = null;
-}
-
-function toggle() {
-    if (open) {
-        close();
-        return;
-    }
-    frozenFactor = uiZoomStore.factor;
-    const rect = wrapEl?.getBoundingClientRect();
-    if (rect) {
-        const rootPx = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
-        const gap = 0.5 * rootPx;
-        pin = {
-            left: rect.left,
-            bottom: window.innerHeight - rect.top + gap,
-        };
-    } else {
-        pin = null;
-    }
-    open = true;
-}
+const popover = new FrozenPopover();
 
 function onKeydown(e: KeyboardEvent) {
-    if (e.key === "Escape") close();
+    if (e.key === "Escape") popover.close();
 }
 
 function pick(id: (typeof UI_ZOOM_LEVELS)[number]["id"]) {
     uiZoomStore.set(id);
-    close();
+    popover.close();
 }
 </script>
 
@@ -63,28 +26,26 @@ function pick(id: (typeof UI_ZOOM_LEVELS)[number]["id"]) {
     <Button
         variant="ghost"
         size="icon"
-        onclick={toggle}
+        onclick={() => popover.toggle(wrapEl)}
         class="!w-[24px] !h-[24px]"
         title="UI zoom"
-        aria-expanded={open}
+        aria-expanded={popover.open}
     >
         <ZoomIn class="w-[12px] h-[12px]" />
     </Button>
 
-    {#if open}
+    {#if popover.open}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div class="fixed inset-0 z-40" onclick={close} onkeydown={() => {}}></div>
+        <div class="fixed inset-0 z-40" onclick={popover.close} onkeydown={() => {}}></div>
 
         <div
             class="ctx-menu z-50 min-w-[140px]"
-            class:fixed={!!pin}
-            class:absolute={!pin}
-            class:bottom-full={!pin}
-            class:mb-2={!pin}
-            class:left-0={!pin}
-            style={pin
-                ? `left: ${pin.left}px; bottom: ${pin.bottom}px; transform: scale(${menuScale}); transform-origin: bottom left;`
-                : undefined}
+            class:fixed={!!popover.pin}
+            class:absolute={!popover.pin}
+            class:bottom-full={!popover.pin}
+            class:mb-2={!popover.pin}
+            class:left-0={!popover.pin}
+            style={popover.style}
         >
             {#each UI_ZOOM_LEVELS as l}
                 <!-- UX refactor: ctx-item stays raw (context menu pattern) -->

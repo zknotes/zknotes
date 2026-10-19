@@ -1,4 +1,5 @@
 <script lang="ts">
+import { Callout, SectionHeader } from "$lib/core/ui";
 import { onMount } from "svelte";
 import { Loader2, Monitor, Smartphone, Tablet, Trash2 } from "lucide-svelte";
 import { deleteSession, getSessions, type SessionInfo } from "$lib/core/api/auth";
@@ -45,10 +46,7 @@ async function handleRevokeSession(id: string) {
 onMount(loadSessions);
 </script>
 
-<div class="mb-8">
-    <h1 class="text-2xl font-bold text-[var(--text)]">Sessions</h1>
-    <p class="text-[var(--text-muted)] mt-1 text-sm">Manage devices that are currently logged in to your account</p>
-</div>
+<SectionHeader title="Sessions" description="Manage devices that are currently logged in to your account" />
 
 <div class="space-y-3">
     {#if isLoadingSessions}
@@ -57,9 +55,7 @@ onMount(loadSessions);
             <span>Loading sessions...</span>
         </div>
     {:else if sessionsError}
-        <div class="p-4 bg-[var(--danger)]/10 text-[var(--danger)] rounded-xl border border-[var(--danger)]/20 font-medium">
-            {sessionsError}
-        </div>
+        <Callout>{sessionsError}</Callout>
     {:else if sessionsList.length === 0}
         <p class="text-sm text-[var(--text-muted)]">No active sessions found.</p>
     {:else}

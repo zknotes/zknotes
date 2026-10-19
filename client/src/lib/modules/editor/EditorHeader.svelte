@@ -259,20 +259,18 @@ function focusInput(node: HTMLInputElement) {
                     }}
                 />
             {:else}
-                <!-- svelte-ignore a11y_no_static_element_interactions -->
-                <!-- svelte-ignore a11y_click_events_have_key_events -->
-                <span
-                    class="truncate font-medium select-none flex items-center gap-1.5 {i === breadcrumb.length - 1 ? 'text-[var(--text-sub)] cursor-pointer' : 'hover:text-[var(--text-sub)] cursor-pointer text-[var(--text-dim)]'}"
+                <Button
+                    variant="ghost"
+                    size="sm"
+                    class="!h-auto !px-1 !py-0.5 !gap-1.5 !font-medium truncate select-none min-w-0 {i === breadcrumb.length - 1 ? 'text-[var(--text-sub)]' : 'text-[var(--text-dim)] hover:text-[var(--text-sub)]'}"
                     title={i === breadcrumb.length - 1 ? "Double-click to rename, click for options" : "Click for options"}
-                    ondblclick={(e) => { e.stopPropagation(); showMenuCrumbId = null; startRename(crumb); }}
-                    onclick={(e) => { 
-                        handleItemClick(e, crumb); 
-                    }}
-                    style={crumb.color ? `color: ${crumb.color}` : ''}
+                    ondblclick={(e: MouseEvent) => { e.stopPropagation(); showMenuCrumbId = null; startRename(crumb); }}
+                    onclick={(e) => handleItemClick(e, crumb)}
+                    style={crumb.color ? `color: ${crumb.color}` : undefined}
                 >
                     {#if crumb.icon}<span class="emoji-icon text-xs leading-none mb-0.5">{crumb.icon}</span>{/if}
-                    <span>{crumb.title}</span>
-                </span>
+                    <span class="truncate">{crumb.title}</span>
+                </Button>
             {/if}
         {/each}
         {#if breadcrumb.length === 0}

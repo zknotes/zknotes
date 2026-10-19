@@ -1,18 +1,9 @@
 <script lang="ts">
 import { Clock } from "lucide-svelte";
-import { SettingsCard } from "$lib/core/ui";
-import {
-    type DateFormat,
-    dateTimeSettings,
-    type TimeFormat,
-} from "$lib/core/stores/datetime-settings.svelte";
+import { SectionHeader, SettingsCard } from "$lib/core/ui";
+import { dateTimeSettings } from "$lib/core/stores/datetime-settings.svelte";
 import { DEFAULT_CUSTOM_DATE_PATTERN } from "$lib/core/utils/date-pattern";
 import { formatDate } from "$lib/core/utils/format";
-
-let timeFormat = $state<TimeFormat>(dateTimeSettings.timeFormat);
-let dateFormat = $state<DateFormat>(dateTimeSettings.dateFormat);
-let customDatePattern = $state(dateTimeSettings.customDatePattern);
-let timezone = $state(dateTimeSettings.timezone);
 
 const timeZones = Intl.supportedValuesOf("timeZone");
 const previewTs = Math.floor(Date.now() / 1000);
@@ -25,32 +16,9 @@ const dateFormatOptions = [
     { value: "yyyy-mm-dd" as const, label: "YYYY-MM-DD" },
     { value: "custom" as const, label: "Custom" },
 ];
-
-function setTimeFormat(v: TimeFormat) {
-    timeFormat = v;
-    dateTimeSettings.setTimeFormat(v);
-}
-
-function setDateFormat(v: DateFormat) {
-    dateFormat = v;
-    dateTimeSettings.setDateFormat(v);
-}
-
-function setCustomDatePattern(v: string) {
-    customDatePattern = v;
-    dateTimeSettings.setCustomDatePattern(v);
-}
-
-function setTimezone(v: string) {
-    timezone = v;
-    dateTimeSettings.setTimezone(v);
-}
 </script>
 
-<div class="mb-8 text-left">
-    <h1 class="text-2xl font-bold text-[var(--text)]">Preferences</h1>
-    <p class="text-[var(--text-muted)] mt-1 text-sm">Editor and display defaults</p>
-</div>
+<SectionHeader title="Preferences" description="Editor and display defaults" />
 
 <div class="divide-y divide-[var(--stroke)] text-left">
 <SettingsCard
@@ -69,13 +37,13 @@ function setTimezone(v: string) {
                     { value: "24h" as const, label: "24-hour" },
                     { value: "12h" as const, label: "12-hour" },
                 ] as option}
-                    <label class="flex items-center gap-3 p-3 rounded-xl border border-[var(--stroke)] hover:bg-[var(--surface-raised)]/50 cursor-pointer transition-colors text-left {timeFormat === option.value ? 'bg-[var(--accent-color)]/5 border-[var(--accent-color)]/30' : ''}">
+                    <label class="flex items-center gap-3 p-3 rounded-xl border border-[var(--stroke)] hover:bg-[var(--surface-raised)]/50 cursor-pointer transition-colors text-left {dateTimeSettings.timeFormat === option.value ? 'bg-[var(--accent-color)]/5 border-[var(--accent-color)]/30' : ''}">
                         <input
                             type="radio"
                             name="time_format"
                             value={option.value}
-                            checked={timeFormat === option.value}
-                            onchange={() => setTimeFormat(option.value)}
+                            checked={dateTimeSettings.timeFormat === option.value}
+                            onchange={() => dateTimeSettings.setTimeFormat(option.value)}
                             class="radio"
                         />
                         <span class="text-sm font-medium text-[var(--text)]">{option.label}</span>
@@ -88,13 +56,13 @@ function setTimezone(v: string) {
             <p class="block text-sm font-medium text-[var(--text)] mb-2">Date format</p>
             <div class="space-y-2">
                 {#each dateFormatOptions as option}
-                    <label class="flex items-center gap-3 p-3 rounded-xl border border-[var(--stroke)] hover:bg-[var(--surface-raised)]/50 cursor-pointer transition-colors text-left {dateFormat === option.value ? 'bg-[var(--accent-color)]/5 border-[var(--accent-color)]/30' : ''}">
+                    <label class="flex items-center gap-3 p-3 rounded-xl border border-[var(--stroke)] hover:bg-[var(--surface-raised)]/50 cursor-pointer transition-colors text-left {dateTimeSettings.dateFormat === option.value ? 'bg-[var(--accent-color)]/5 border-[var(--accent-color)]/30' : ''}">
                         <input
                             type="radio"
                             name="date_format"
                             value={option.value}
-                            checked={dateFormat === option.value}
-                            onchange={() => setDateFormat(option.value)}
+                            checked={dateTimeSettings.dateFormat === option.value}
+                            onchange={() => dateTimeSettings.setDateFormat(option.value)}
                             class="radio"
                         />
                         <span class="text-sm font-medium text-[var(--text)]">{option.label}</span>
@@ -102,7 +70,7 @@ function setTimezone(v: string) {
                 {/each}
             </div>
 
-            {#if dateFormat === "custom"}
+            {#if dateTimeSettings.dateFormat === "custom"}
                 <div class="mt-4 space-y-2">
                     <label for="custom-date-pattern" class="block text-sm font-medium text-[var(--text)]">
                         Custom format pattern
@@ -110,8 +78,8 @@ function setTimezone(v: string) {
                     <input
                         id="custom-date-pattern"
                         type="text"
-                        value={customDatePattern}
-                        oninput={(e) => setCustomDatePattern(e.currentTarget.value)}
+                        value={dateTimeSettings.customDatePattern}
+                        oninput={(e) => dateTimeSettings.setCustomDatePattern(e.currentTarget.value)}
                         placeholder={DEFAULT_CUSTOM_DATE_PATTERN}
                         class="input w-full font-mono"
                     />
@@ -130,8 +98,8 @@ function setTimezone(v: string) {
             <label for="timezone" class="block text-sm font-medium text-[var(--text)] mb-2">Timezone</label>
             <select
                 id="timezone"
-                value={timezone}
-                onchange={(e) => setTimezone(e.currentTarget.value)}
+                value={dateTimeSettings.timezone}
+                onchange={(e) => dateTimeSettings.setTimezone(e.currentTarget.value)}
                 class="input w-full"
             >
                 <option value="system">System</option>

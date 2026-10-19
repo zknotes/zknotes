@@ -1,5 +1,6 @@
 <script lang="ts">
 import { X } from "lucide-svelte";
+import { quickViewForPath } from "$lib/core/constants/views";
 import { utilityReturnStore } from "$lib/core/stores/utility-return.svelte";
 import Button from "./Button.svelte";
 
@@ -18,10 +19,8 @@ let closeTitle = $derived.by(() => {
     if (target === "/") return "Close";
     if (target.startsWith("/settings")) return "Close and return to settings";
     if (target.startsWith("/help")) return "Close and return to help";
-    if (target.startsWith("/files")) return "Close and return to files";
-    if (target.startsWith("/starred")) return "Close and return to starred";
-    if (target.startsWith("/recent")) return "Close and return to recent";
-    if (target.startsWith("/trash")) return "Close and return to trash";
+    const view = quickViewForPath(target);
+    if (view) return `Close and return to ${view.label.toLowerCase()}`;
     return "Close";
 });
 </script>
