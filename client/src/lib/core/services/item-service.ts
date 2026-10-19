@@ -8,6 +8,7 @@ import { getDB, type LocalItem, type ZKnotesDBSchema } from "$lib/core/db";
 import { fileBridge } from "$lib/core/events/file-bridge";
 import { evictChunkSet } from "$lib/core/files/chunk-loader";
 import { addOrUpdateDoc, removeDoc } from "$lib/core/search";
+import { toSearchDoc } from "$lib/core/search/doc";
 import { conflictStore } from "$lib/core/stores/conflict-store.svelte";
 import { globalToasts } from "$lib/core/stores/toast.svelte";
 import { enqueueMutation, pushDeletes, pushItem } from "$lib/core/sync";
@@ -17,9 +18,8 @@ import {
 } from "$lib/core/sync/conflict";
 import { toBase64 } from "$lib/core/utils/base64";
 import { FileLifecycle } from "$lib/core/utils/file-lifecycle";
-import { extractPlainText } from "$lib/core/utils/tiptap-text";
 import { collectDescendants } from "$lib/core/utils/tree";
-import { encryptPayloadWithNewKeyTask } from "$lib/core/workers/crypto-rpc";
+import { encryptPayloadWithNewKeyTask, type SearchDoc } from "$lib/core/workers/crypto-rpc";
 import { stripAllFileRefsFromHtml } from "$lib/modules/files/refs";
 
 /**
@@ -51,12 +51,7 @@ function withItemWriteLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
 }
 
 /** The SearchDoc that reencryptAndSave sends to the index after a successful save. */
-export interface ReindexDoc {
-    id: string;
-    type: "note" | "folder" | "file";
-    title: string;
-    content?: string;
-}
+export type ReindexDoc = SearchDoc;
 
 /**
  * The item's row vanished from under an active edit — deleted or purged on another device, and the
@@ -532,12 +527,7 @@ export class ItemService {
             required: true,
             basedOnContent: opts.basedOnContent,
             intoConflictCopy: opts.intoConflictCopy,
-            reindex: (payload, item) => ({
-                id,
-                type: item.type,
-                title: (payload.title as string) || "Untitled",
-                content: item.type === "note" ? extractPlainText(content) : undefined,
-            }),
+            reindex: (payload, item) => toSearchDoc(item, payload),
         });
     }
 
@@ -576,27 +566,14 @@ export class ItemService {
             (p) => ({ ...p, content: ((p.content as string) || "") + nodeHtml }),
             {
                 required: true,
-                reindex: (payload, item) => ({
-                    id: noteId,
-                    type: item.type,
-                    title: (payload.title as string) || "Untitled",
-                    content: extractPlainText((payload.content as string) || ""),
-                }),
+                reindex: (payload, item) => toSearchDoc(item, payload),
             },
         );
     }
 
     static async updateItemTitle(id: string, title: string) {
         await ItemService.reencryptAndSave(id, (p) => ({ ...p, title }), {
-            reindex: (payload, item) => ({
-                id,
-                type: item.type,
-                title,
-                content:
-                    item.type === "note" && payload.content
-                        ? extractPlainText(payload.content as string)
-                        : undefined,
-            }),
+            reindex: (payload, item) => toSearchDoc(item, payload),
         });
     }
 
@@ -768,15 +745,7 @@ export class ItemService {
                 void (async () => {
                     try {
                         const p = await decryptItemPayload<Partial<NotePayload>>(it);
-                        await addOrUpdateDoc({
-                            id: it.id,
-                            type: it.type,
-                            title: p.title || "Untitled",
-                            content:
-                                it.type === "note" && p.content
-                                    ? extractPlainText(p.content)
-                                    : undefined,
-                        });
+                        await addOrUpdateDoc(toSearchDoc(it, p));
                     } catch (e) {
                         console.warn(`Failed to index restored item ${it.id}`, e);
                     }

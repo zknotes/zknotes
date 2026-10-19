@@ -4,7 +4,7 @@ import { ChevronDown, FileImage, FolderClosed, Loader2, RefreshCw, Trash2, X } f
 import { onMount } from "svelte";
 import { goto, replaceState } from "$app/navigation";
 import { page } from "$app/state";
-import { QUERY_KEYS } from "$lib/core/constants/query-keys";
+import { treeItemsQueryOptions } from "$lib/core/data/item-queries";
 import {
     filterFilesByScope,
     matchesFileType,
@@ -129,13 +129,7 @@ async function performDelete(fileIds: string[]) {
     }
 }
 
-const itemsQuery = createQuery(() => ({
-    queryKey: QUERY_KEYS.treeItems,
-    queryFn: async () => {
-        const { getTreeItems } = await import("$lib/core/data/items");
-        return getTreeItems();
-    },
-}));
+const itemsQuery = createQuery(() => treeItemsQueryOptions());
 
 const selected = $derived(
     selectedId !== null ? ((itemsQuery.data ?? []).find((i) => i.id === selectedId) ?? null) : null,
@@ -190,10 +184,12 @@ onMount(() => {
     syncFiltersFromUrl();
 });
 
+// The local trash size follows the tree; the server-side quota is fetched on mount, after a
+// deletion and on the Refresh button — not on every tree change (each autosave, rename or pin
+// invalidates the tree, and that used to cost a `/me/storage` round trip every time).
 $effect(() => {
     itemsQuery.data;
     void refreshTrashSize();
-    void refreshStorage();
 });
 
 const folderOptions = $derived(

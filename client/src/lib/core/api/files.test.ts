@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { S3PutError, getChunk, isPermanentStorageRejection, isPresignRejected } from "./files";
+import { ApiError, setUnauthorizedHandler, UnauthorizedError } from "./client";
+import {
+    S3PutError,
+    getChunk,
+    isPermanentStorageRejection,
+    isPresignRejected,
+    openUploadSession,
+    pingUploadSession,
+} from "./files";
 
 // A presigned URL is valid for 1 h, while the JSON carrying it may come out of an HTTP
 // cache (our own Caddy used to rewrite that to 24 h; someone else's proxy or CDN we do not control).
@@ -17,11 +25,24 @@ function bytes(...values: number[]): Response {
 }
 
 function json(url: string): Response {
-    return { ok: true, status: 200, json: async () => ({ url }) } as unknown as Response;
+    return {
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({ url }),
+    } as unknown as Response;
 }
 
-function status(code: number): Response {
-    return { ok: false, status: code } as unknown as Response;
+function status(code: number, body?: Record<string, unknown>): Response {
+    return {
+        ok: false,
+        status: code,
+        statusText: `status ${code}`,
+        json: async () => {
+            if (!body) throw new SyntaxError("not json");
+            return body;
+        },
+    } as unknown as Response;
 }
 
 let calls: FetchCall[];
@@ -45,6 +66,32 @@ beforeEach(() => {
 afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    setUnauthorizedHandler(null);
+});
+
+// The JSON upload calls share the one transport, so an expired session during an upload locks the
+// vault like anywhere else, and a refusal carries the server's body for the classifier.
+describe("upload session calls go through apiFetch", () => {
+    it("a 401 on the heartbeat runs the session teardown handler", async () => {
+        const onUnauthorized = vi.fn();
+        setUnauthorizedHandler(onUnauthorized);
+        installFetch([status(401, { error: "unauthorized" })]);
+
+        await expect(pingUploadSession("cs1")).rejects.toBeInstanceOf(UnauthorizedError);
+        expect(onUnauthorized).toHaveBeenCalledWith("expired");
+        expect(calls[0]?.url).toBe("/uploads/cs1/ping");
+        expect(calls[0]?.init?.credentials).toBe("include");
+    });
+
+    it("a refused open carries the code and the body", async () => {
+        installFetch([status(413, { error: "file_too_large", max_file_size: 1024 })]);
+
+        const err = await openUploadSession(1, 2048, [2048]).catch((e: unknown) => e);
+        expect(err).toBeInstanceOf(ApiError);
+        expect((err as ApiError).status).toBe(413);
+        expect((err as ApiError).message).toBe("file_too_large");
+        expect((err as ApiError).body).toEqual({ error: "file_too_large", max_file_size: 1024 });
+    });
 });
 
 describe("getChunk", () => {

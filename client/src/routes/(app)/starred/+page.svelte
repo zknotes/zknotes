@@ -3,6 +3,7 @@ import { createQuery, useQueryClient } from "@tanstack/svelte-query";
 import { CornerDownRight, FileText, Home, Shield, Star } from "lucide-svelte";
 import { goto } from "$app/navigation";
 import { QUERY_KEYS } from "$lib/core/constants/query-keys";
+import { treeItemsQueryOptions } from "$lib/core/data/item-queries";
 import { folderPathSegments } from "$lib/core/data/items";
 import { ItemService } from "$lib/core/services/item-service";
 import Button from "$lib/core/ui/Button.svelte";
@@ -14,13 +15,7 @@ import { relativeTime } from "$lib/core/utils/format";
 
 const queryClient = useQueryClient();
 
-const itemsQuery = createQuery(() => ({
-    queryKey: QUERY_KEYS.treeItems,
-    queryFn: async () => {
-        const { getTreeItems } = await import("$lib/core/data/items");
-        return getTreeItems();
-    },
-}));
+const itemsQuery = createQuery(() => treeItemsQueryOptions());
 
 let itemMap = $derived.by(() => {
     const map = new Map<string, { title: string; parent_id: string | null }>();

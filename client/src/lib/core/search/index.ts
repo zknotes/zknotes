@@ -24,7 +24,10 @@ import {
     searchIndexTask,
     serializeIndexTask,
 } from "$lib/core/workers/crypto-rpc";
+import { toSearchDoc } from "./doc";
 import { mergeHits, type RankedHit, rankTitles, recentItems } from "./rank";
+
+export { toSearchDoc };
 
 const INDEX_KEY = "index";
 const PERSIST_DEBOUNCE_MS = 1_500;
@@ -168,15 +171,7 @@ export async function rebuildIndex(
                 console.warn(`Skipping item ${r.id} during index build`, r.error);
                 continue;
             }
-            const doc: SearchDoc = {
-                id: item.id,
-                type: item.type,
-                title: r.data.title || "Untitled",
-            };
-            if (item.type === "note" && r.data.content) {
-                doc.content = extractPlainText(r.data.content);
-            }
-            docs.push(doc);
+            docs.push(toSearchDoc(item, r.data));
         }
         built += chunk.length;
         onProgress?.(built, live.length);

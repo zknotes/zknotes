@@ -16,7 +16,7 @@ import { onMount, untrack } from "svelte";
 import { goto, onNavigate } from "$app/navigation";
 import { page } from "$app/state";
 import { QUERY_KEYS } from "$lib/core/constants/query-keys";
-import { SECOND_MS } from "$lib/core/utils/duration";
+import { deletedItemsQueryOptions, treeItemsQueryOptions } from "$lib/core/data/item-queries";
 import { countVisibleTrashItems, type DecryptedItemMeta } from "$lib/core/data/items";
 import { loadOrBuildIndex } from "$lib/core/search";
 import { ItemService } from "$lib/core/services/item-service";
@@ -87,23 +87,13 @@ let pendingUploadDialog = $state<{ count: number; kind: "uploads" | "unsynced" }
 
 // The reactive counts from the tree items query
 const treeItemsQuery = createQuery(() => ({
-    queryKey: QUERY_KEYS.treeItems,
-    queryFn: async () => {
-        const { getTreeItems } = await import("$lib/core/data/items");
-        return getTreeItems();
-    },
+    ...treeItemsQueryOptions(),
     enabled: authStore.isVaultUnlocked,
-    staleTime: 30 * SECOND_MS,
 }));
 
 const deletedItemsQuery = createQuery(() => ({
-    queryKey: QUERY_KEYS.deletedItems,
-    queryFn: async () => {
-        const { getDeletedItems } = await import("$lib/core/data/items");
-        return getDeletedItems();
-    },
+    ...deletedItemsQueryOptions(),
     enabled: authStore.isVaultUnlocked,
-    staleTime: 5 * SECOND_MS,
 }));
 
 let starredCount = $derived(
@@ -422,6 +412,7 @@ async function toggleLock() {
 
 const handleGlobalTreeKeyDown = createGlobalTreeKeyHandler({
     getRouteNoteId: () => page.params.id,
+    getTreeItems: () => treeItemsQuery.data ?? [],
     onItemsChanged: async () => {
         await queryClient.invalidateQueries({ queryKey: QUERY_KEYS.treeItems });
         await queryClient.invalidateQueries({ queryKey: QUERY_KEYS.deletedItems });

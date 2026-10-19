@@ -17,7 +17,7 @@ import {
     Trash2,
     X,
 } from "lucide-svelte";
-import { QUERY_KEYS } from "$lib/core/constants/query-keys";
+import { treeItemsQueryOptions } from "$lib/core/data/item-queries";
 import { type DecryptedItemMeta, folderPathSegments } from "$lib/core/data/items";
 import Button from "$lib/core/ui/Button.svelte";
 import Dialog from "$lib/core/ui/Dialog.svelte";
@@ -39,13 +39,7 @@ interface Props {
 const { file, onClose, onChanged }: Props = $props();
 
 // The path of the folder the file lives in (one source of truth — folderPathSegments).
-const treeQuery = createQuery(() => ({
-    queryKey: QUERY_KEYS.treeItems,
-    queryFn: async () => {
-        const { getTreeItems } = await import("$lib/core/data/items");
-        return getTreeItems();
-    },
-}));
+const treeQuery = createQuery(() => treeItemsQueryOptions());
 
 let folderPath = $derived.by(() => {
     if (!file.parent_id) return "Unlinked";

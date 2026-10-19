@@ -86,18 +86,20 @@ function resetNoteViewState() {
     shareAuthKeyB64 = undefined;
 }
 
-async function loadShareMeta(id: string): Promise<void> {
+// Returns the state instead of writing it: the effect below assigns it only when the share id it
+// loaded for is still the one on screen, so a slow answer for a previous link cannot overwrite the
+// current one.
+async function loadShareMeta(id: string): Promise<typeof meta> {
     try {
         const res = await getShareMeta(id);
         if ("status" in res && res.status === "unavailable") {
-            meta = { status: "unavailable" };
-            return;
+            return { status: "unavailable" };
         }
         const alive = res as Exclude<
             import("$lib/core/api/shares").ShareMetaResponse,
             { status: "unavailable" }
         >;
-        meta = {
+        return {
             status: "ready",
             needsPassword: alive.needs_password,
             kdfSalt: alive.share_kdf_salt,
@@ -106,7 +108,7 @@ async function loadShareMeta(id: string): Promise<void> {
             hasAttachments: Boolean(alive.has_attachments),
         };
     } catch {
-        meta = { status: "unavailable" };
+        return { status: "unavailable" };
     }
 }
 
@@ -125,8 +127,8 @@ $effect(() => {
     showSharePassword = false;
     untrack(() => resetNoteViewState());
 
-    void loadShareMeta(id).then(() => {
-        if (cancelled) return;
+    void loadShareMeta(id).then((loaded) => {
+        if (!cancelled) meta = loaded;
     });
 
     return () => {

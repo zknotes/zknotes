@@ -8,15 +8,15 @@ import { page } from "$app/state";
 import { QUERY_KEYS } from "$lib/core/constants/query-keys";
 import type { DecryptedItemMeta } from "$lib/core/data/items";
 import { ItemService } from "$lib/core/services/item-service";
+import { trashNodeWithUndo } from "$lib/core/services/trash-with-undo";
 import { activeSidebarId } from "$lib/core/stores/active-sidebar-id.svelte";
 import { pendingExpandId } from "$lib/core/stores/pending-expand.svelte";
 import { pendingRenameId } from "$lib/core/stores/pending-rename.svelte";
-import { globalToasts } from "$lib/core/stores/toast.svelte";
 import { expandedFolders } from "$lib/core/utils/expanded-folders";
 import { calcDropSortOrder, calcInsertSortOrder } from "$lib/core/utils/fractional-index";
 import { getAncestor, isDescendantOf, type TreeNode } from "$lib/core/utils/tree";
 import { treeDragState } from "$lib/core/utils/tree-drag-state";
-import { findNextRowAfterDelete, getAdjacentRow } from "$lib/core/utils/tree-keyboard";
+import { getAdjacentRow } from "$lib/core/utils/tree-keyboard";
 import Button from "./Button.svelte";
 import FolderItem from "./FolderItem.svelte";
 import ItemContextMenu from "./ItemContextMenu.svelte";
@@ -131,67 +131,21 @@ function handleRenameKeydown(e: KeyboardEvent) {
 
 async function handleDelete() {
     showContextMenu = false;
-
-    const { nextNodeId, nextNodeType } = findNextRowAfterDelete(node.id, node.type);
-    const nextRow = nextNodeId
-        ? (document.querySelector(
-              `.tree-item-row[data-node-id="${nextNodeId}"]`,
-          ) as HTMLElement | null)
-        : null;
-
-    if (nextNodeId && nextRow) {
-        activeSidebarId.set(nextNodeId);
-        nextRow.focus();
-    } else {
-        activeSidebarId.set(null);
-    }
-
-    // Capture the open note and the live tree BEFORE the deletion — so we know whether the open note
-    // is inside the subtree being deleted (a cascade) and can redirect it (otherwise it stays in the
-    // editor although it is no longer in the tree).
-    const openId = page.params.id;
-    const treeBefore =
-        queryClient.getQueryData<{ id: string; parent_id: string | null; type: string }[]>(
-            QUERY_KEYS.treeItems,
-        ) ?? [];
-
-    await ItemService.deleteItem(node.id);
-    await queryClient.invalidateQueries({ queryKey: QUERY_KEYS.treeItems });
-    void queryClient.invalidateQueries({ queryKey: QUERY_KEYS.deletedItems });
-
-    globalToasts.add({
-        variant: "info",
-        message: `${node.title || "Item"} moved to trash`,
-        durationMs: 7000,
-        action: {
-            label: "Undo",
-            onClick: async () => {
-                await ItemService.restoreItem(node.id);
-                await queryClient.invalidateQueries({ queryKey: QUERY_KEYS.treeItems });
-                void queryClient.invalidateQueries({ queryKey: QUERY_KEYS.deletedItems });
-            },
+    await trashNodeWithUndo({
+        id: node.id,
+        type: node.type,
+        title: node.title,
+        openNoteId: page.params.id,
+        // The live tree BEFORE the deletion — whether the open note is inside the trashed subtree.
+        treeItems:
+            queryClient.getQueryData<{ id: string; parent_id: string | null }[]>(
+                QUERY_KEYS.treeItems,
+            ) ?? [],
+        onItemsChanged: async () => {
+            await queryClient.invalidateQueries({ queryKey: QUERY_KEYS.treeItems });
+            void queryClient.invalidateQueries({ queryKey: QUERY_KEYS.deletedItems });
         },
     });
-
-    // Redirect if the open note was deleted — directly (node === note) OR as a descendant of a deleted
-    // folder (a cascade). Otherwise the note stays in the editor although it is no longer in the tree.
-    const openTrashed =
-        !!openId && (openId === node.id || isDescendantOf(openId, node.id, treeBefore));
-    if (openTrashed) {
-        if (nextNodeId && nextNodeType === "note") {
-            await goto(`/note/${nextNodeId}`, { keepFocus: true });
-        } else {
-            await goto("/", { keepFocus: true });
-        }
-    }
-
-    // An extra safeguard in case goto disturbs the focus anyway
-    if (nextNodeId) {
-        const el = document.querySelector(
-            `.tree-item-row[data-node-id="${nextNodeId}"]`,
-        ) as HTMLElement;
-        el?.focus();
-    }
 }
 
 async function createContextItem(type: "note" | "folder") {

@@ -3,7 +3,7 @@ import { createQuery } from "@tanstack/svelte-query";
 import { Clock, CornerDownRight, FileText, Home, Shield } from "lucide-svelte";
 import { onMount } from "svelte";
 import { goto } from "$app/navigation";
-import { QUERY_KEYS } from "$lib/core/constants/query-keys";
+import { treeItemsQueryOptions } from "$lib/core/data/item-queries";
 import { folderPathSegments } from "$lib/core/data/items";
 import { recentNotesStore } from "$lib/core/stores/recent-notes.svelte";
 import CollectionList from "$lib/core/ui/CollectionList.svelte";
@@ -16,13 +16,7 @@ onMount(() => {
     recentNotesStore.init();
 });
 
-const itemsQuery = createQuery(() => ({
-    queryKey: QUERY_KEYS.treeItems,
-    queryFn: async () => {
-        const { getTreeItems } = await import("$lib/core/data/items");
-        return getTreeItems();
-    },
-}));
+const itemsQuery = createQuery(() => treeItemsQueryOptions());
 
 let itemMap = $derived.by(() => {
     const map = new Map<string, { title: string; parent_id: string | null }>();

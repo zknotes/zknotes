@@ -5,9 +5,9 @@ import { APP_EVENTS } from "$lib/core/constants/events";
 import { decryptItemPayload, encryptItemPayloadToBase64 } from "$lib/core/crypto/item-codec";
 import { getDB, type LocalItem } from "$lib/core/db";
 import { addOrUpdateDoc, removeDoc } from "$lib/core/search";
+import { toSearchDoc } from "$lib/core/search/doc";
 import { conflictStore } from "$lib/core/stores/conflict-store.svelte";
 import { fromBase64, toBase64 } from "$lib/core/utils/base64";
-import { extractPlainText } from "$lib/core/utils/tiptap-text";
 import {
     addCachedItemKey,
     cloneItemKeyTask,
@@ -92,19 +92,10 @@ export async function createLocalConflictCopyFromPayload(
         updated_at: Math.floor(Date.now() / 1000),
     };
 
-    const title =
-        ((originalItem.type === "file" ? payload.name : payload.title) as string) || "Untitled";
-    void addOrUpdateDoc({
-        id: newId,
-        type: originalItem.type,
-        title,
-        content:
-            originalItem.type === "note" && payload.content
-                ? extractPlainText(payload.content)
-                : undefined,
-    }).catch((e) => console.warn("Failed to index conflict copy", e));
+    const doc = toSearchDoc({ id: newId, type: originalItem.type }, payload);
+    void addOrUpdateDoc(doc).catch((e) => console.warn("Failed to index conflict copy", e));
 
-    return { item: conflictItem, title };
+    return { item: conflictItem, title: doc.title };
 }
 
 /**
@@ -187,12 +178,9 @@ export async function replaceConflictCopyContent(
     await tx.done;
 
     await enqueueMutation(copyId, "upsert");
-    void addOrUpdateDoc({
-        id: copyId,
-        type: "note",
-        title: (payload.title as string) || "Untitled",
-        content: extractPlainText(content),
-    }).catch((e) => console.warn("Failed to re-index conflict copy", e));
+    void addOrUpdateDoc(toSearchDoc({ id: copyId, type: "note" }, payload)).catch((e) =>
+        console.warn("Failed to re-index conflict copy", e),
+    );
     return "written";
 }
 
@@ -251,11 +239,9 @@ export async function createLocalFileConflictCopy(
         updated_at: Math.floor(Date.now() / 1000),
     };
 
-    void addOrUpdateDoc({
-        id: newId,
-        type: "file",
-        title: (payload.name as string) || "file",
-    }).catch((e) => console.warn("Failed to index file conflict copy", e));
+    void addOrUpdateDoc(toSearchDoc({ id: newId, type: "file" }, payload)).catch((e) =>
+        console.warn("Failed to index file conflict copy", e),
+    );
 
     return { item: conflictItem, title: payload.name as string };
 }
@@ -459,17 +445,9 @@ export async function resolveConflictInDB(
         await enqueueMutation(conflictId, "delete");
         void removeDoc(conflictId).catch(() => {});
 
-        const title =
-            ((copy.type === "file" ? payload.name : payload.title) as string) || "Untitled";
-        void addOrUpdateDoc({
-            id: originalId,
-            type: copy.type,
-            title,
-            content:
-                copy.type === "note" && payload.content
-                    ? extractPlainText(payload.content)
-                    : undefined,
-        }).catch((e) => console.warn("Failed to re-index resolved conflict", e));
+        void addOrUpdateDoc(toSearchDoc({ id: originalId, type: copy.type }, payload)).catch((e) =>
+            console.warn("Failed to re-index resolved conflict", e),
+        );
 
         conflictStore.removeResolved(conflictId);
         notifyConflictResolved(originalId, conflictId);
@@ -515,14 +493,9 @@ export async function resolveConflictInDB(
     // PROPAGATION + REINDEX + UI — outside the transaction (their own IDB operations / async).
     await enqueueMutation(conflictId, "upsert");
 
-    const title = ((copy.type === "file" ? payload.name : payload.title) as string) || "Untitled";
-    void addOrUpdateDoc({
-        id: conflictId,
-        type: copy.type,
-        title,
-        content:
-            copy.type === "note" && payload.content ? extractPlainText(payload.content) : undefined,
-    }).catch((e) => console.warn("Failed to re-index resolved conflict", e));
+    void addOrUpdateDoc(toSearchDoc({ id: conflictId, type: copy.type }, payload)).catch((e) =>
+        console.warn("Failed to re-index resolved conflict", e),
+    );
 
     conflictStore.removeResolved(conflictId);
     notifyConflictResolved(originalId, conflictId);

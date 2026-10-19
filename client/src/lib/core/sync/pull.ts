@@ -15,11 +15,11 @@ import {
     resumeIndexPersistenceAndFlush,
     suspendIndexPersistence,
 } from "$lib/core/search";
+import { toSearchDoc } from "$lib/core/search/doc";
 import { conflictStore } from "$lib/core/stores/conflict-store.svelte";
 import { SECOND_MS } from "$lib/core/utils/duration";
 import { clearRestoreUiKeys } from "$lib/core/utils/clear-vault-ui-keys";
 import { loadPersisted, rawStringSerde, STORAGE_KEYS } from "$lib/core/utils/persisted";
-import { extractPlainText } from "$lib/core/utils/tiptap-text";
 import type { SearchDoc } from "$lib/core/workers/crypto-rpc";
 import { createConflictCopyForItem } from "./conflict";
 import { enqueueMutation } from "./outbox";
@@ -352,15 +352,7 @@ export async function pullAndMerge(opts?: {
                         serverItem.payload_nonce &&
                         payload
                     ) {
-                        indexDocs.push({
-                            id: serverItem.id,
-                            type: serverItem.type,
-                            title: payload.title || "Untitled",
-                            content:
-                                serverItem.type === "note" && payload.content
-                                    ? extractPlainText(payload.content)
-                                    : undefined,
-                        });
+                        indexDocs.push(toSearchDoc(serverItem, payload));
                     }
                     // A new conflict item from another device → surface it in the inbox at once.
                     if (serverItem.conflict_of && !local) {

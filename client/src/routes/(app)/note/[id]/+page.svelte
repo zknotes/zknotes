@@ -6,7 +6,8 @@ import { beforeNavigate, goto } from "$app/navigation";
 import { page } from "$app/state";
 import { APP_EVENTS } from "$lib/core/constants/events";
 import { QUERY_KEYS } from "$lib/core/constants/query-keys";
-import { type DecryptedItemMeta, getTreeItems } from "$lib/core/data/items";
+import { treeItemsQueryOptions } from "$lib/core/data/item-queries";
+import type { DecryptedItemMeta } from "$lib/core/data/items";
 import { ItemService } from "$lib/core/services/item-service";
 import { recentNotesStore } from "$lib/core/stores/recent-notes.svelte";
 import Button from "$lib/core/ui/Button.svelte";
@@ -142,10 +143,7 @@ let noteQuery = createQuery(() => ({
 }));
 
 // The files attached to this note (parent_id === noteId, type === "file").
-let treeItemsQuery = createQuery(() => ({
-    queryKey: QUERY_KEYS.treeItems,
-    queryFn: getTreeItems,
-}));
+let treeItemsQuery = createQuery(() => treeItemsQueryOptions());
 
 // DEV: the server version / localRev in the DevPanel (taken out of the note header).
 $effect(() => {

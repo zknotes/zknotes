@@ -23,6 +23,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ### Fixed
 
+- Search now lists files under their file name. A file that arrived by sync, or was indexed when
+  the index was rebuilt, used to be indexed as "Untitled", so typing "unt" listed every file.
+- A session that expires while a backup is being restored now locks the vault and returns to
+  sign-in like everywhere else, instead of leaving the vault open behind a failed restore. The same
+  now holds for an expired session during a file upload.
+- Pressing Delete on a folder in the sidebar now leaves the editor when the note open in it was
+  inside that folder; before, the note stayed on screen although it had just moved to the trash.
+  The row's own menu already did this.
+- Files: the storage bar no longer refetches the quota from the server on every change in the tree
+  (each autosave, rename or pin); it refreshes on arrival, after a deletion and on Refresh.
+- Settings → Backup: the file picker behind "Select backup file" and "Continue" is one element
+  again; two bound to the same field could leave the button opening nothing.
+- A shared link opened right after another one no longer shows the slower, earlier link's state.
 - Settings → Delete vault now says which vault it deletes (the address you are signed in as), and
   when you arrive from the account area it refuses to delete a different vault than the one you
   came for — the browser may be signed in to another vault, because the account area and the app

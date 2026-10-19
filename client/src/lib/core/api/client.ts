@@ -52,13 +52,26 @@ export function isServerUnreachableError(err: unknown): boolean {
     return typeof err === "object" && err !== null && noResponseErrors.has(err);
 }
 
-export async function extractError(res: Response): Promise<string> {
+/**
+ * The parsed error body of a refused request, when there was one. The server's `error` field is the
+ * machine-readable code; the rest (`max_file_size` on a 413, `restore_session_id` on a 409) is what
+ * callers classify by, so it travels on the `ApiError` instead of being parsed again by each client.
+ */
+async function parseErrorBody(res: Response): Promise<Record<string, unknown> | undefined> {
     try {
-        const data = (await res.json()) as { error?: string };
-        return data.error || res.statusText;
+        const data: unknown = await res.json();
+        return typeof data === "object" && data !== null
+            ? (data as Record<string, unknown>)
+            : undefined;
     } catch {
-        return res.statusText;
+        return undefined;
     }
+}
+
+/** The server's error code or, failing that, the status text — what every client shows or matches on. */
+export async function extractError(res: Response): Promise<string> {
+    const body = await parseErrorBody(res);
+    return (typeof body?.error === "string" && body.error) || res.statusText;
 }
 
 let onUnauthorized: ((reason?: "expired" | "locked") => void) | null = null;
@@ -135,8 +148,9 @@ export async function apiFetch<T>(endpoint: string, apiOptions: ApiFetchOptions 
             throw new UnauthorizedError();
         }
 
-        const errorMessage = await extractError(res);
-        throw new ApiError(errorMessage || "API Request failed", res.status);
+        const body = await parseErrorBody(res);
+        const code = typeof body?.error === "string" ? body.error : res.statusText;
+        throw new ApiError(code || "API Request failed", res.status, body);
     }
 
     if (res.status === 204 || res.headers.get("content-length") === "0") {

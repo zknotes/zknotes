@@ -1,25 +1,14 @@
-// Raw-fetch helpers for the file upload endpoints. Kept apart from `apiFetch` because the
-// chunks are binary octet-stream rather than JSON.
+// The file upload endpoints. The JSON calls go through `apiFetch` like every other route (offline
+// short-circuit, timeout, and the 401/403 session teardown — an expired session during an upload
+// heartbeat must lock the vault like anywhere else). A refused call throws `ApiError(code, status,
+// body)`: the classifier decides by status and code, never by the text, and the body carries details
+// such as `max_file_size`. Only the binary chunk traffic (`putChunk` over XHR for progress, `getChunk`
+// against the presigned S3 URL) and the HEAD existence probe use a raw `fetch`.
 import { FILE_LIMITS } from "@zknotes/shared";
-import { API_BASE, ApiError } from "./client";
+import { API_BASE, apiFetch } from "./client";
 
-/**
- * A refused upload call throws `ApiError(code, status, body)`: the classifier decides by status and
- * code, never by the text, and the body carries details such as `max_file_size`.
- */
-async function jsonOrThrow<T>(res: Response): Promise<T> {
-    if (!res.ok) {
-        let body: Record<string, unknown> = {};
-        try {
-            body = (await res.json()) as Record<string, unknown>;
-        } catch {
-            // Not JSON — the status text stands in for the code.
-        }
-        const code = typeof body.error === "string" ? body.error : res.statusText;
-        throw new ApiError(code || "Request failed", res.status, body);
-    }
-    return res.json() as Promise<T>;
-}
+// Validating a large upload server-side can take a while; do not give up at the default 30 s.
+const FINALIZE_TIMEOUT_MS = 120_000;
 
 /** POST /uploads — opens a session and returns the chunk_set_id (with no bulk put_urls). */
 export async function openUploadSession(
@@ -28,10 +17,8 @@ export async function openUploadSession(
     chunkSizes: number[],
     restoreSessionId?: string,
 ): Promise<{ chunk_set_id: string }> {
-    const res = await fetch(`${API_BASE}/uploads`, {
+    return apiFetch<{ chunk_set_id: string }>("/uploads", {
         method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
             expected_chunks: expectedChunks,
             total_size: totalSize,
@@ -39,7 +26,6 @@ export async function openUploadSession(
             ...(restoreSessionId ? { restore_session_id: restoreSessionId } : {}),
         }),
     });
-    return jsonOrThrow<{ chunk_set_id: string }>(res);
 }
 
 /** POST /uploads/:chunkSetId/urls — lazy mint of presigned PUT URLs. */
@@ -47,13 +33,10 @@ export async function mintUploadUrls(
     chunkSetId: string,
     indices: number[],
 ): Promise<{ index: number; put_url: string }[]> {
-    const res = await fetch(`${API_BASE}/uploads/${chunkSetId}/urls`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ indices }),
-    });
-    const body = await jsonOrThrow<{ urls: { index: number; put_url: string }[] }>(res);
+    const body = await apiFetch<{ urls: { index: number; put_url: string }[] }>(
+        `/uploads/${chunkSetId}/urls`,
+        { method: "POST", body: JSON.stringify({ indices }) },
+    );
     return body.urls;
 }
 
@@ -85,11 +68,9 @@ export async function openUpload(
 export async function pingUploadSession(
     chunkSetId: string,
 ): Promise<{ ok: boolean; session_status: string }> {
-    const res = await fetch(`${API_BASE}/uploads/${chunkSetId}/ping`, {
+    return apiFetch<{ ok: boolean; session_status: string }>(`/uploads/${chunkSetId}/ping`, {
         method: "POST",
-        credentials: "include",
     });
-    return jsonOrThrow<{ ok: boolean; session_status: string }>(res);
 }
 
 /** GET /uploads/:chunkSetId/status — the batch status of the chunks on S3. */
@@ -100,10 +81,7 @@ export async function getUploadStatus(chunkSetId: string): Promise<{
     present_indices: number[];
     total_present_size: number;
 }> {
-    const res = await fetch(`${API_BASE}/uploads/${chunkSetId}/status`, {
-        credentials: "include",
-    });
-    return jsonOrThrow(res);
+    return apiFetch(`/uploads/${chunkSetId}/status`);
 }
 
 function s3PutErrorMessage(status: number, statusText: string, body: string): string {
@@ -228,20 +206,16 @@ export function putChunk(
 
 /** POST finalize — validates completeness and commits the set. */
 export async function finalizeUpload(chunkSetId: string): Promise<void> {
-    const res = await fetch(`${API_BASE}/uploads/${chunkSetId}/finalize`, {
+    await apiFetch(`/uploads/${chunkSetId}/finalize`, {
         method: "POST",
-        credentials: "include",
+        timeoutMs: FINALIZE_TIMEOUT_MS,
     });
-    await jsonOrThrow(res);
 }
 
 /** DELETE — aborts an upload in progress (returning the quota and deleting the chunks). */
 export async function abortUpload(chunkSetId: string): Promise<void> {
     try {
-        await fetch(`${API_BASE}/uploads/${chunkSetId}`, {
-            method: "DELETE",
-            credentials: "include",
-        });
+        await apiFetch(`/uploads/${chunkSetId}`, { method: "DELETE" });
     } catch {
         // best effort; GC reclaims it anyway
     }
@@ -253,13 +227,10 @@ async function fetchChunkUrl(
     index: number,
     bustCache: boolean,
 ): Promise<string> {
-    const res = await fetch(`${API_BASE}/uploads/${chunkSetId}/chunks/${index}`, {
-        credentials: "include",
+    const { url } = await apiFetch<{ url: string }>(`/uploads/${chunkSetId}/chunks/${index}`, {
         ...(bustCache ? { cache: "reload" as RequestCache } : {}),
     });
-    if (!res.ok) throw new Error(`chunk ${index} fetch failed (${res.status})`);
-    const { url } = await res.json();
-    return url as string;
+    return url;
 }
 
 async function fetchChunkBytes(index: number, url: string): Promise<Response> {
@@ -312,8 +283,8 @@ export async function chunkStatus(
     }
 }
 
-/** GET /me/storage — the quota for the UI bar + the per-user max file size + the plan. */
-export async function getStorage(): Promise<{
+/** What `GET /me/storage` answers — the quota bar, the per-user max file size and the plan. */
+export interface StorageInfo {
     breakdown: {
         files_bytes: number;
         items_bytes: number;
@@ -327,22 +298,9 @@ export async function getStorage(): Promise<{
     plan_label: string | null;
     /** The concrete share TTL allowed; the client filters the options by it. */
     max_share_ttl_sec: number;
-}> {
-    const res = await fetch(`${API_BASE}/me/storage`, {
-        credentials: "include",
-        cache: "no-store",
-    });
-    return jsonOrThrow<{
-        breakdown: {
-            files_bytes: number;
-            items_bytes: number;
-            history_bytes: number;
-            trashed_bytes: number;
-            total_used: number;
-        };
-        storage_quota: number;
-        max_file_size: number;
-        plan_label: string | null;
-        max_share_ttl_sec: number;
-    }>(res);
+}
+
+/** GET /me/storage — always fresh: the bar is shown right after the change that moved it. */
+export async function getStorage(): Promise<StorageInfo> {
+    return apiFetch<StorageInfo>("/me/storage", { cache: "no-store" });
 }

@@ -7,8 +7,8 @@ import { APP_EVENTS } from "$lib/core/constants/events";
 import { decryptItemPayload } from "$lib/core/crypto/item-codec";
 import { getDB, type LocalItem } from "$lib/core/db";
 import { addOrUpdateDoc, removeDoc } from "$lib/core/search";
+import { toSearchDoc } from "$lib/core/search/doc";
 import { conflictStore } from "$lib/core/stores/conflict-store.svelte";
-import { extractPlainText } from "$lib/core/utils/tiptap-text";
 import { createConflictCopyForItem, isConflictIdentical } from "./conflict";
 import { type DB, enqueueMutation } from "./outbox";
 import { syncStore } from "./store.svelte";
@@ -30,12 +30,7 @@ async function indexItemFromServer(item: LocalItem, payload?: AnyItemPayload): P
         if (!item.encrypted_payload || !item.payload_nonce) return;
 
         const p = payload ?? (await decryptItemPayload<Partial<NotePayload>>(item));
-        await addOrUpdateDoc({
-            id: item.id,
-            type: item.type,
-            title: p.title || "Untitled",
-            content: item.type === "note" && p.content ? extractPlainText(p.content) : undefined,
-        });
+        await addOrUpdateDoc(toSearchDoc(item, p));
     } catch (e) {
         console.warn(`Failed to index synced item ${item.id}`, e);
     }

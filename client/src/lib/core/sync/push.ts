@@ -2,9 +2,9 @@
 // serialised per tab and across tabs, and the background drain of the outbox with its backoff, its
 // batch splitting and its recovery paths.
 import { type DeleteId, FILE_LIMITS, SYNC_LIMITS, topoSortByParent } from "@zknotes/shared";
-import { pushBatch } from "$lib/core/api";
+import { ApiError, pushBatch } from "$lib/core/api";
 import { APP_EVENTS } from "$lib/core/constants/events";
-import type { EncryptedItem, LocalItem } from "$lib/core/db";
+import type { EncryptedItem, LocalItem, MutationQueueItem } from "$lib/core/db";
 import { getDB } from "$lib/core/db";
 import { fileBridge } from "$lib/core/events/file-bridge";
 import { evictChunkSet } from "$lib/core/files/chunk-loader";
@@ -24,18 +24,15 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
     return chunks;
 }
 
-/** Recognises non-retryable 4xx errors (408 and 429 aside) that mean a permanent problem with the item or the request. */
+/**
+ * Recognises a server refusal (a 4xx other than 408 and 429) that means a permanent problem with
+ * the item or the request. Only the API's own typed error counts — a network failure, a timeout or
+ * an unrelated object that happens to carry a `status` is not a verdict on the item.
+ */
 export function isPermanentPushError(err: unknown): boolean {
-    if (
-        err &&
-        typeof err === "object" &&
-        "status" in err &&
-        typeof (err as any).status === "number"
-    ) {
-        const status = (err as any).status;
-        return status >= 400 && status < 500 && status !== 408 && status !== 429;
-    }
-    return false;
+    if (!(err instanceof ApiError)) return false;
+    const { status } = err;
+    return status >= 400 && status < 500 && status !== 408 && status !== 429;
 }
 
 /**
@@ -100,6 +97,40 @@ const TERMINAL_REJECTION_ATTEMPTS = 3;
  * set, the content kept and still dirty (a pull must not overwrite it; clearSyncErrorsAndRequeue or
  * the files module's re-upload puts it back). The same shape as the thrown-4xx park below.
  */
+/**
+ * One more failed attempt for a queued mutation. With `park` given and the mutation now failed
+ * TERMINAL_REJECTION_ATTEMPTS times it is parked by that function; otherwise it goes back into the
+ * queue with a fresh `attempted_at` for the backoff. Five sites used to spell this out by hand, three
+ * of them with the threshold as a literal.
+ */
+async function retryOrPark(
+    db: DB,
+    mut: MutationQueueItem,
+    park: (() => Promise<void>) | null,
+): Promise<void> {
+    mut.attempt_count = (mut.attempt_count || 0) + 1;
+    if (park && mut.attempt_count >= TERMINAL_REJECTION_ATTEMPTS) {
+        await park();
+        return;
+    }
+    mut.attempted_at = Date.now();
+    await db.put("mutation-queue", mut);
+}
+
+/**
+ * Parks an item the server rejects permanently (isPermanentPushError): out of the queue, `sync_error`
+ * set, the content kept and still dirty — a pull must not silently overwrite the local copy, and
+ * clearSyncErrorsAndRequeue puts it back.
+ */
+async function parkPermanentFailure(db: DB, id: string, message: string): Promise<void> {
+    await db.delete("mutation-queue", id);
+    const item = await db.get("items", id);
+    if (!item) return;
+    item.sync_error = message;
+    await db.put("items", item);
+    syncStore.noteParkedFailure();
+}
+
 async function parkTerminalRejection(db: DB, id: string, error: string): Promise<void> {
     await db.delete("mutation-queue", id);
     const item = await db.get("items", id);
@@ -332,14 +363,12 @@ async function drainUpsertMutations(
                 if (keepInQueue.has(mut.id)) {
                     // Rejected (by the server) or requeued (a conflict crypto failure) — back off,
                     // do not clear.
-                    mut.attempt_count = (mut.attempt_count || 0) + 1;
-                    mut.attempted_at = Date.now();
                     const terminal = terminalErrors.get(mut.id);
-                    if (terminal && mut.attempt_count >= TERMINAL_REJECTION_ATTEMPTS) {
-                        await parkTerminalRejection(db, mut.id, terminal);
-                        continue;
-                    }
-                    await db.put("mutation-queue", mut);
+                    await retryOrPark(
+                        db,
+                        mut,
+                        terminal ? () => parkTerminalRejection(db, mut.id, terminal) : null,
+                    );
                 } else {
                     await db.delete("mutation-queue", mut.id);
                     // applySucceeded kept dirty (a concurrent localRev) — without a re-enqueue
@@ -399,14 +428,12 @@ async function drainUpsertMutations(
                             { sentLocalRevs: new Map([[item.id, item.localRev ?? 0]]) },
                         );
                         if (rejectedIds.includes(mut.id) || requeueIds.includes(mut.id)) {
-                            mut.attempt_count = (mut.attempt_count || 0) + 1;
-                            mut.attempted_at = Date.now();
                             const terminal = terminalErrors.get(mut.id);
-                            if (terminal && mut.attempt_count >= TERMINAL_REJECTION_ATTEMPTS) {
-                                await parkTerminalRejection(db, mut.id, terminal);
-                                continue;
-                            }
-                            await db.put("mutation-queue", mut);
+                            await retryOrPark(
+                                db,
+                                mut,
+                                terminal ? () => parkTerminalRejection(db, mut.id, terminal) : null,
+                            );
                         } else {
                             await db.delete("mutation-queue", mut.id);
                             const after = await db.get("items", mut.id);
@@ -414,41 +441,25 @@ async function drainUpsertMutations(
                                 await enqueueMutation(mut.id, "upsert");
                         }
                     } catch (soloErr) {
-                        mut.attempt_count = (mut.attempt_count || 0) + 1;
-                        if (isPermanentPushError(soloErr) && mut.attempt_count >= 3) {
-                            await db.delete("mutation-queue", mut.id);
-                            const fresh = await db.get("items", mut.id);
-                            if (fresh) {
-                                fresh.sync_error =
-                                    soloErr instanceof Error
-                                        ? soloErr.message
-                                        : "Permanent push error";
-                                await db.put("items", fresh);
-                                syncStore.noteParkedFailure();
-                            }
-                        } else {
-                            mut.attempted_at = Date.now();
-                            await db.put("mutation-queue", mut);
-                        }
+                        const message =
+                            soloErr instanceof Error ? soloErr.message : "Permanent push error";
+                        await retryOrPark(
+                            db,
+                            mut,
+                            isPermanentPushError(soloErr)
+                                ? () => parkPermanentFailure(db, mut.id, message)
+                                : null,
+                        );
                     }
                 }
                 continue;
             }
             for (const mut of validMuts) {
-                mut.attempt_count = (mut.attempt_count || 0) + 1;
-                if (isPermanent && mut.attempt_count >= 3) {
-                    await db.delete("mutation-queue", mut.id);
-                    const item = await db.get("items", mut.id);
-                    if (item) {
-                        item.sync_error = msg;
-                        // It stays dirty — a pull must not silently overwrite the local copy; clearSyncErrors re-enqueues it.
-                        await db.put("items", item);
-                        syncStore.noteParkedFailure();
-                    }
-                } else {
-                    mut.attempted_at = Date.now();
-                    await db.put("mutation-queue", mut);
-                }
+                await retryOrPark(
+                    db,
+                    mut,
+                    isPermanent ? () => parkPermanentFailure(db, mut.id, msg) : null,
+                );
             }
         }
     }
@@ -538,13 +549,12 @@ async function drainDeleteMutations(
                 syncStore.markSyncError(msg);
             }
             for (const mut of chunk) {
-                mut.attempt_count = (mut.attempt_count || 0) + 1;
-                if (isPermanent && mut.attempt_count >= 3) {
-                    await db.delete("mutation-queue", mut.id);
-                } else {
-                    mut.attempted_at = Date.now();
-                    await db.put("mutation-queue", mut);
-                }
+                // A delete the server refuses for good has nothing to park — the row just leaves the queue.
+                await retryOrPark(
+                    db,
+                    mut,
+                    isPermanent ? () => db.delete("mutation-queue", mut.id) : null,
+                );
             }
         }
     }

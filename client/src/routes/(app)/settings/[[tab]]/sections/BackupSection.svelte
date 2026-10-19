@@ -633,18 +633,20 @@ onMount(() => {
                 </div>
             {/if}
 
+            <!-- One picker for both the first selection and "Continue": two inputs bound to the same
+                 ref would leave the ref on whichever branch rendered last. -->
+            <input
+                type="file"
+                accept=".zip,.cnbackup"
+                class="hidden"
+                bind:this={importFileInputRef}
+                onchange={(e) => {
+                    const f = (e.target as HTMLInputElement).files?.[0];
+                    if (f) void handleImportFileSelect(f);
+                }}
+            />
             {#if zipImportState === "idle"}
                 <div>
-                    <input
-                        type="file"
-                        accept=".zip,.cnbackup"
-                        class="hidden"
-                        bind:this={importFileInputRef}
-                        onchange={(e) => {
-                            const f = (e.target as HTMLInputElement).files?.[0];
-                            if (f) void handleImportFileSelect(f);
-                        }}
-                    />
                     <Button
                         variant="warning"
                         size="lg"
@@ -671,16 +673,6 @@ onMount(() => {
                         </Button>
                         <Button variant="normal" size="lg" onclick={() => void cancelRestore()}>Cancel</Button>
                     </div>
-                    <input
-                        type="file"
-                        accept=".zip,.cnbackup"
-                        class="hidden"
-                        bind:this={importFileInputRef}
-                        onchange={(e) => {
-                            const f = (e.target as HTMLInputElement).files?.[0];
-                            if (f) void handleImportFileSelect(f);
-                        }}
-                    />
                 </div>
             {:else if zipImportState === "wrong_file"}
                 <div class="p-5 border border-[var(--danger)]/20 bg-[var(--danger)]/5 rounded-2xl space-y-4" data-testid="restore-wrong-file">

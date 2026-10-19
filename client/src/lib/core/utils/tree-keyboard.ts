@@ -1,3 +1,5 @@
+import { activeSidebarId } from "$lib/core/stores/active-sidebar-id.svelte";
+
 /**
  * Returns the next or previous .tree-item-row element relative to currentEl.
  */
@@ -47,14 +49,11 @@ export function findNextRowAfterDelete(
 
 // ── The global Delete/Alt+N handler (lifted out of (app)/+layout.svelte) ─────────
 
-import { goto } from "$app/navigation";
-import { ItemService } from "$lib/core/services/item-service";
-import { activeSidebarId } from "$lib/core/stores/active-sidebar-id.svelte";
-import { globalToasts } from "$lib/core/stores/toast.svelte";
-
 export interface GlobalTreeKeyDeps {
     /** The note ID from the current route (page.params.id) — the layout passes it in. */
     getRouteNoteId: () => string | undefined;
+    /** The live tree — whether the open note sits inside the subtree being trashed. */
+    getTreeItems: () => readonly { id: string; parent_id: string | null }[];
     /** Invalidates the tree + deleted queries after a delete/undo. */
     onItemsChanged: () => Promise<void> | void;
 }
@@ -82,67 +81,23 @@ export function createGlobalTreeKeyHandler(deps: GlobalTreeKeyDeps) {
             const activeId = activeSidebarId.current || deps.getRouteNoteId();
             if (activeId) {
                 e.preventDefault();
-
-                const activeRow = document.querySelector(
+                const activeRow = document.querySelector<HTMLElement>(
                     `.tree-item-row[data-node-id="${activeId}"]`,
-                ) as HTMLElement | null;
-                const deletedNodeType = activeRow?.dataset.nodeType ?? "note";
-                const { nextNodeId, nextNodeType } = findNextRowAfterDelete(
-                    activeId,
-                    deletedNodeType,
                 );
-                const nextRow = nextNodeId
-                    ? (document.querySelector(
-                          `.tree-item-row[data-node-id="${nextNodeId}"]`,
-                      ) as HTMLElement | null)
-                    : null;
-
-                if (nextNodeId && nextRow) {
-                    activeSidebarId.set(nextNodeId);
-                    nextRow.focus();
-                } else {
-                    activeSidebarId.set(null);
-                }
-
                 try {
-                    // Read the node's title before the deletion
-                    const itemEl = document.querySelector(
-                        `.tree-item-row[data-node-id="${activeId}"]`,
-                    ) as HTMLElement;
-                    const nodeTitle =
-                        itemEl?.querySelector(".truncate")?.textContent?.trim() || "Item";
-
-                    await ItemService.deleteItem(activeId);
-                    await deps.onItemsChanged();
-
-                    globalToasts.add({
-                        variant: "info",
-                        message: `${nodeTitle} moved to trash`,
-                        durationMs: 7000,
-                        action: {
-                            label: "Undo",
-                            onClick: async () => {
-                                await ItemService.restoreItem(activeId);
-                                await deps.onItemsChanged();
-                            },
-                        },
+                    // The service is imported lazily: it reaches the item service and the toasts,
+                    // which this keyboard helper must not pull into every importer.
+                    const { trashNodeWithUndo } = await import(
+                        "$lib/core/services/trash-with-undo"
+                    );
+                    await trashNodeWithUndo({
+                        id: activeId,
+                        type: activeRow?.dataset.nodeType ?? "note",
+                        title: activeRow?.querySelector(".truncate")?.textContent?.trim(),
+                        openNoteId: deps.getRouteNoteId(),
+                        treeItems: deps.getTreeItems(),
+                        onItemsChanged: deps.onItemsChanged,
                     });
-
-                    if (deps.getRouteNoteId() === activeId) {
-                        if (nextNodeId && nextNodeType === "note") {
-                            await goto(`/note/${nextNodeId}`, { keepFocus: true });
-                        } else {
-                            await goto("/", { keepFocus: true });
-                        }
-                    }
-
-                    // An extra safeguard
-                    if (nextNodeId) {
-                        const el = document.querySelector(
-                            `.tree-item-row[data-node-id="${nextNodeId}"]`,
-                        ) as HTMLElement;
-                        el?.focus();
-                    }
                 } catch (err) {
                     console.error("Failed to delete item globally", err);
                 }

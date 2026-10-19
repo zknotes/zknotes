@@ -5,7 +5,7 @@
  *   auth.ts        — /auth/* (login, register, me, change-password, …)
  *   items.ts       — /items batch push + delta pull
  *   history.ts     — /items/:id/history snapshots
- *   files.ts       — the /uploads chunk pipeline (a raw fetch, binary payloads)
+ *   files.ts       — the /uploads chunk pipeline (JSON through apiFetch, raw fetch for the bytes)
  *   diagnostics.ts — /client-error, /client-log (fire-and-forget)
  *
  * The UI and the services import the domain functions — the endpoint strings and the request shapes
@@ -45,6 +45,7 @@ export {
     pingUploadSession,
     putChunk,
     S3PutError,
+    type StorageInfo,
 } from "./files";
 export {
     clearAllSnapshots,

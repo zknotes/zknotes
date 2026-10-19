@@ -1,9 +1,7 @@
 <script lang="ts">
 import { createQuery } from "@tanstack/svelte-query";
-import { QUERY_KEYS } from "$lib/core/constants/query-keys";
-import { getTreeItems } from "$lib/core/data/items";
+import { treeItemsQueryOptions } from "$lib/core/data/item-queries";
 import { authStore } from "$lib/core/stores/auth-store.svelte";
-import { SECOND_MS } from "$lib/core/utils/duration";
 import { buildTree } from "$lib/core/utils/tree";
 import { EmptyState, ErrorText } from "$lib/core/ui";
 import FolderItem from "./FolderItem.svelte";
@@ -11,13 +9,8 @@ import FolderItem from "./FolderItem.svelte";
 // Don't start decrypting tree items until the crypto worker is unlocked — the query would
 // fail with "Worker not unlocked" if it fires during the startup race.
 const itemsQuery = createQuery(() => ({
-    queryKey: QUERY_KEYS.treeItems,
-    queryFn: getTreeItems,
+    ...treeItemsQueryOptions(),
     enabled: authStore.isVaultUnlocked,
-    // Matches (app)/+layout.svelte's own copy of this query (query "perf 10") — without it, this
-    // observer treats the shared cache entry as always-stale and can trigger its own background
-    // refetch on every mount/focus even when the layout's copy would not have.
-    staleTime: 30 * SECOND_MS,
 }));
 
 let tree = $derived(buildTree(itemsQuery.data ?? []));

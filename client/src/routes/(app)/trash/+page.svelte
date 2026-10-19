@@ -16,6 +16,7 @@ import {
 import { goto } from "$app/navigation";
 import { onMount } from "svelte";
 import { QUERY_KEYS } from "$lib/core/constants/query-keys";
+import { deletedItemsQueryOptions, treeItemsQueryOptions } from "$lib/core/data/item-queries";
 import {
     batchAttachmentsForNote,
     type DeletedItemMeta,
@@ -48,21 +49,9 @@ import { globalToasts } from "$lib/core/stores/toast.svelte";
 import { expandedFolders } from "$lib/core/utils/expanded-folders";
 const queryClient = useQueryClient();
 
-const deletedQuery = createQuery(() => ({
-    queryKey: QUERY_KEYS.deletedItems,
-    queryFn: async () => {
-        const { getDeletedItems } = await import("$lib/core/data/items");
-        return getDeletedItems();
-    },
-}));
+const deletedQuery = createQuery(() => deletedItemsQueryOptions());
 
-const treeQuery = createQuery(() => ({
-    queryKey: QUERY_KEYS.treeItems,
-    queryFn: async () => {
-        const { getTreeItems } = await import("$lib/core/data/items");
-        return getTreeItems();
-    },
-}));
+const treeQuery = createQuery(() => treeItemsQueryOptions());
 
 type LocNode = { title: string; parent_id: string | null; deleted: boolean };
 type TypeFilter = "all" | "items" | "files";

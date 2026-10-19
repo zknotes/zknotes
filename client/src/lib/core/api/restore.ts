@@ -1,7 +1,7 @@
 // The client for the restore wizard's routes. The error body is kept because a 409
 // `restore_already_open` carries the `restore_session_id` needed to continue.
 import type { RestoreManifestItem, RestoreMode, RestoreStagedItem } from "@zknotes/shared";
-import { API_BASE, UnauthorizedError } from "./client";
+import { ApiError, apiFetch } from "./client";
 
 export class RestoreClientError extends Error {
     constructor(
@@ -72,39 +72,23 @@ export interface RestoreVerifyResult {
     version_drift: Array<{ id: string; expected: number; actual: number }>;
 }
 
+// A restore call may have to wait on the server staging or committing a large backup.
 const RESTORE_TIMEOUT_MS = 120_000;
 
+/**
+ * The one transport (`apiFetch`: offline short-circuit, timeout, and the 401/403 session teardown)
+ * with the error re-thrown under the wizard's own name, body included. An earlier private copy of
+ * the transport here skipped the teardown, so a session that expired mid-restore left the vault open.
+ */
 async function restoreFetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-    if (typeof navigator !== "undefined" && navigator.onLine === false) {
-        throw new TypeError("Failed to fetch");
-    }
-    const timeoutSignal =
-        typeof AbortSignal !== "undefined" && "timeout" in AbortSignal
-            ? AbortSignal.timeout(RESTORE_TIMEOUT_MS)
-            : undefined;
-    const res = await fetch(`${API_BASE}${endpoint}`, {
-        ...options,
-        signal: options.signal ?? timeoutSignal,
-        headers: {
-            ...(options.body !== undefined ? { "Content-Type": "application/json" } : {}),
-            ...options.headers,
-        },
-        credentials: "include",
-    });
-    if (!res.ok) {
-        if ((res.status === 401 || res.status === 403) && !endpoint.startsWith("/auth/")) {
-            throw new UnauthorizedError();
+    try {
+        return await apiFetch<T>(endpoint, { ...options, timeoutMs: RESTORE_TIMEOUT_MS });
+    } catch (e) {
+        if (e instanceof ApiError) {
+            throw new RestoreClientError(e.message, e.status, e.body ?? { error: e.message });
         }
-        let body: Record<string, unknown> = {};
-        try {
-            body = (await res.json()) as Record<string, unknown>;
-        } catch {
-            body = { error: res.statusText };
-        }
-        throw new RestoreClientError(String(body.error ?? "restore_failed"), res.status, body);
+        throw e;
     }
-    if (res.status === 204) return undefined as T;
-    return res.json() as Promise<T>;
 }
 
 export async function createRestoreSession(input: {
