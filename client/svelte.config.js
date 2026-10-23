@@ -14,15 +14,14 @@ const config = {
         adapter: adapter({ fallback: "index.html" }),
         // The version names the service worker's cache (`zknotes-shell-${version}`) and drives
         // SvelteKit's new-version check. A release build names it after the commit, so the same
-        // commit builds the same bytes. Without a commit it falls back to a timestamp, NOT to a
-        // constant: a constant would give every self-host rebuild the same version, and users would
-        // stay on the old app shell.
-        version: {
-            name:
-                process.env.APP_COMMIT && process.env.APP_COMMIT !== "dev"
-                    ? process.env.APP_COMMIT
-                    : Date.now().toString(),
-        },
+        // commit builds the same bytes. Without a commit SvelteKit's own default (a build timestamp)
+        // stays: a constant would give every self-host rebuild the same version, and users would stay
+        // on the old app shell. Do NOT compute that timestamp here — this file is evaluated more than
+        // once per build, each evaluation would get a different value, and the client would look for
+        // a bootstrap global (`__sveltekit_<hash of version>`) that the page never defined.
+        ...(process.env.APP_COMMIT && process.env.APP_COMMIT !== "dev"
+            ? { version: { name: process.env.APP_COMMIT } }
+            : {}),
         // In dev we do not register the SW: `build` and `files` are empty sets (Vite does not
         // generates the production chunks), so PRECACHE_PATHS contains nothing. The SW then catches
         // every same-origin GET and answers 503 when Vite does not serve an unexpected URL — blocking
