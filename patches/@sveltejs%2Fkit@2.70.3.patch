@@ -1,3 +1,6 @@
+diff --git a/node_modules/@sveltejs/kit/.bun-tag-5597752f4b325d90 b/.bun-tag-5597752f4b325d90
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/src/core/sync/create_manifest_data/index.js b/src/core/sync/create_manifest_data/index.js
 index 6e97903682f448a9c95a01527530bd0bdb545174..f9dc0a81087542d452e8bd12877162d96f65eace 100644
 --- a/src/core/sync/create_manifest_data/index.js
@@ -25,3 +28,21 @@ index 6e97903682f448a9c95a01527530bd0bdb545174..f9dc0a81087542d452e8bd12877162d9
  
  			// process files first
  			for (const file of files) {
+diff --git a/src/core/utils.js b/src/core/utils.js
+index 3bbcdea712ff97e792265d64763a1caa17f2a160..7b968509d341b141b15ba27c18dc7ab7bc50d7a0 100644
+--- a/src/core/utils.js
++++ b/src/core/utils.js
+@@ -68,7 +68,12 @@ export function list_files(dir, filter) {
+ 
+ 	/** @param {string} current */
+ 	function walk(current) {
+-		for (const file of fs.readdirSync(path.resolve(dir, current))) {
++		// ZKnotes patch: sort the entries. This lists the static assets, and their order ends up in
++		// the service worker's `files` array; unsorted, it follows the filesystem's directory order
++		// (reverse creation order on tmpfs, a per-filesystem hash order on ext4), so the same source
++		// builds different bytes on different machines. Not fixed upstream as of @sveltejs/kit 3.1.0.
++		const entries = fs.readdirSync(path.resolve(dir, current)).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
++		for (const file of entries) {
+ 			const child = path.posix.join(current, file);
+ 			if (fs.statSync(path.resolve(dir, child)).isDirectory()) {
+ 				walk(child);
