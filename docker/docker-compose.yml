@@ -95,6 +95,9 @@ services:
         # PUBLIC_WWW_URL is NOT passed through: the public site's address is a **runtime** value from
         # `/instance-config`. A build must have no instance-specific input.
         APP_COMMIT: ${APP_COMMIT:-dev}
+        # The commit's timestamp, for a reproducible build (see docker/Dockerfile.web). Unset, the
+        # build uses the clock — fine for a self-host, not for a build anyone has to reproduce.
+        SOURCE_DATE_EPOCH: ${SOURCE_DATE_EPOCH:-}
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true

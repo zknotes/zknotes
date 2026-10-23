@@ -12,6 +12,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
   capitals, numbers and symbols, and marks well-known passwords and patterns like `1234` as weak.
   It never refuses a password: a weak one gets a single warning above the button, and pressing the
   button again keeps it.
+- The web image now builds reproducibly: the same commit, built with `APP_COMMIT` set to the full
+  commit hash and `SOURCE_DATE_EPOCH` to the commit's timestamp, gives a byte-identical web root, so
+  anyone can check that a server sends the client this repository contains.
+  `scripts/verify-reproducible.sh` runs the check, CI runs it on every push and publishes the hash,
+  and `docker/README.md` ("Reproducing the web build") explains what it covers and what it does not.
+  Without the two variables the image still builds, using the clock as before.
 
 ### Changed
 

@@ -1,11 +1,21 @@
 # ── ZKnotes Web — Static build ────────────────────────────────────────────
 # It builds the SvelteKit SPA with adapter-static, then serves it through a minimal nginx.
 # Every asset is immutable; the SPA shell is served for every route.
-FROM oven/bun:1.4.2-alpine AS builder
+#
+# Reproducible: the same commit, built with the same SOURCE_DATE_EPOCH and APP_COMMIT, gives a
+# byte-identical web root — scripts/verify-reproducible.sh proves it, and CI runs it on every push.
+# The builder image is part of that claim: Vite turns some of its own functions into source text
+# with Function.prototype.toString(), and Bun transpiles modules as it loads them, so the Bun build
+# is an input to the bytes. Both images are therefore pinned by digest (the multi-arch index, so
+# arm64 still resolves). Refreshing a digest: `docker buildx imagetools inspect <image:tag>`.
+FROM oven/bun:1.4.2-alpine@sha256:d888c0ae6c86d7866ff10c5aafdd9077b36aee6455b33dd270fb93c0dd5cef6f AS builder
 
 WORKDIR /app
 
+# `patches/` before the install: package.json declares patchedDependencies, and bun applies them
+# while installing (see the patch itself for why it exists).
 COPY package.json bun.lock ./
+COPY patches patches
 COPY shared/package.json shared/
 COPY client/package.json client/
 COPY server/package.json server/
@@ -27,6 +37,10 @@ COPY CHANGELOG.md CHANGELOG.md
 
 ARG APP_COMMIT=dev
 ENV APP_COMMIT=${APP_COMMIT}
+# The commit's timestamp (`git show -s --format=%ct <commit>`). Empty means "use the clock", which
+# is fine for an ad-hoc build and wrong for one that has to be reproduced.
+ARG SOURCE_DATE_EPOCH=
+ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}
 
 # svelte.config.js uses adapter-static (an SPA with a fallback index.html) → the output lands in build/.
 RUN cd client && bun run build
@@ -42,8 +56,11 @@ RUN HASHES="$(bun /tmp/csp/extract-csp-script-hashes.ts /app/client/build/index.
     && echo "CSP script hashes: ${HASHES}"
 
 # ── Runtime image ──────────────────────────────────────────────────────────────
-FROM nginx:1.29-alpine
+FROM nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de
 
+# The web root holds the build output and nothing else: the base image ships its own index.html and
+# 50x.html, and a file that is served but not built is a file no one can verify.
+RUN rm -rf /usr/share/nginx/html/*
 COPY --from=builder /app/client/build /usr/share/nginx/html
 # The official nginx image: *.template in /etc/nginx/templates → envsubst at startup.
 # CSP_CONNECT_EXTRA (the S3 storage origin) comes from the compose environment.

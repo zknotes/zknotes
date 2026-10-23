@@ -5,6 +5,20 @@ import { defineConfig } from "vite";
 import pkg from "../package.json";
 import { changelogPlugin } from "../scripts/changelog/vite-changelog-plugin";
 
+// A reproducible build takes its timestamp from the commit, not from the clock: SOURCE_DATE_EPOCH
+// (seconds, UTC — the reproducible-builds.org convention) is set by the release build and by
+// scripts/verify-reproducible.sh. Without it (dev, an ad-hoc self-host build) the clock is used, as
+// before. A malformed value fails the build here instead of surfacing as an Invalid Date deep in
+// the bundle.
+function buildDate(): string {
+    const raw = process.env.SOURCE_DATE_EPOCH;
+    if (!raw) return new Date().toISOString();
+    if (!/^\d+$/.test(raw)) {
+        throw new Error(`SOURCE_DATE_EPOCH must be whole seconds since the epoch, got "${raw}"`);
+    }
+    return new Date(Number(raw) * 1000).toISOString();
+}
+
 export default defineConfig({
     resolve: {
         alias: {
@@ -13,7 +27,7 @@ export default defineConfig({
     },
     define: {
         __APP_VERSION__: JSON.stringify(pkg.version),
-        __BUILD_DATE__: JSON.stringify(new Date().toISOString()),
+        __BUILD_DATE__: JSON.stringify(buildDate()),
         __COMMIT_HASH__: JSON.stringify(process.env.APP_COMMIT ?? "dev"),
     },
     plugins: [

@@ -205,6 +205,35 @@ dump of the whole database instead (the `pg_dump` in §4 includes the journal). 
 rows by hand: a database whose schema is older than the journal claims would then skip migrations it
 still needs.
 
+### Reproducing the web build
+
+The web image is built reproducibly: the same commit, built with the same two inputs, gives a
+byte-identical web root. That is what lets anyone check that a server sends the client this
+repository contains. The two inputs are:
+
+- `APP_COMMIT` — the **full** commit hash (`git rev-parse HEAD`). A short hash would do for a label,
+  but its length depends on your clone, and the value ends up in the bundle.
+- `SOURCE_DATE_EPOCH` — the commit's timestamp (`git show -s --format=%ct HEAD`), used instead of the
+  build time.
+
+Leave them unset and the image still builds — it takes the clock instead — but nobody can reproduce
+it. To build in the reproducible way and print the hash of what nginx will serve:
+
+```bash
+export APP_COMMIT=$(git rev-parse HEAD) SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)
+docker compose build web
+docker compose run --rm --no-deps -T --entrypoint sh web -s /usr/share/nginx/html < ../scripts/tree-hash.sh
+```
+
+`scripts/verify-reproducible.sh [commit]` does the whole check from the repository root: it builds
+the image twice from `git archive`, without the layer cache, and requires the same hash. CI runs it on
+every push to `main` and writes the hash to the job summary.
+
+What this covers and what it does not: the claim holds for the digest-pinned builder image in
+`Dockerfile.web` (the Bun version is an input — Vite turns some functions into source text, and Bun
+transpiles them first), not for a local `vite build` under Node. And a matching hash for a commit
+does not by itself prove what one particular server sends to one particular visitor.
+
 ---
 
 ## 4. Backup & restore

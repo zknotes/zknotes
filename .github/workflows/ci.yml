@@ -103,7 +103,9 @@ jobs:
   clean-build:
     name: Builds from this repository alone
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Four web image builds without cache (two for reproducibility, two for its self-test) on top of
+    # the deployment images.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # No setup-bun here on purpose: the build happens inside a container that gets nothing but
@@ -111,10 +113,17 @@ jobs:
       # container is the official Bun image at the version `packageManager` in package.json names.
       - name: Bun image from package.json
         run: echo "BUN_IMAGE=oven/bun:$(node -p 'require("./package.json").packageManager.split("@")[1]')-alpine" >> "$GITHUB_ENV"
+      # The two inputs a reproducible build takes besides the source (docker/Dockerfile.web).
+      - name: Build inputs from the commit
+        run: |
+          echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)" >> "$GITHUB_ENV"
+          echo "APP_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
       - name: Build the client in a clean container
         run: |
           docker run --rm \
             -v "$PWD:/src:ro" \
+            -v "$RUNNER_TEMP:/out" \
+            -e SOURCE_DATE_EPOCH -e APP_COMMIT \
             -w /work \
             "$BUN_IMAGE" \
             sh -eux -c '
@@ -126,6 +135,7 @@ jobs:
               bun install --frozen-lockfile
               cd client && bun run build
               test -f build/index.html
+              sh ../scripts/tree-hash.sh build > /out/clean-tree-hash
             '
       # "The client builds" and "the deployment builds" are two different claims, and only the first
       # was ever checked. Both Dockerfiles carried a `COPY` of a directory that is not part of this
@@ -158,6 +168,27 @@ jobs:
           # a CSP that looks correct. Assert a hash actually landed.
           docker run --rm --entrypoint sh zknotes-web:ci -c \
             "grep -q \"script-src 'self' 'wasm-unsafe-eval' 'sha256-\" /etc/nginx/templates/default.conf.template"
+      # Publishing the source only means something if what a server sends can be compared with it,
+      # and that needs a build anyone can repeat to the byte. This step builds the web image twice
+      # from `git archive`, without the layer cache, and requires identical web roots; the treeHash
+      # lands in the job summary, a record kept by this repository's CI rather than by an operator.
+      # It also has to equal the clean-container build above, which saw a plain checkout — tests
+      # included, a different path, Vite started another way — so the hash depends on the source
+      # and the two build inputs, not on how the source was handed over.
+      #
+      # What it does NOT prove: that a given server serves this build. That takes comparing this
+      # hash with the one the server's deploy records, and a server can still send one visitor
+      # something else. scripts/verify-reproducible.sh's header has the rest.
+      - name: The web build is reproducible
+        run: |
+          scripts/verify-reproducible.sh "$GITHUB_SHA" | tee "$RUNNER_TEMP/repro.log"
+          repro="$(sed -n 's/^TREE_HASH=//p' "$RUNNER_TEMP/repro.log")"
+          clean="$(cat "$RUNNER_TEMP/clean-tree-hash")"
+          if [ "$repro" != "$clean" ]; then
+            echo "::error::the image build ($repro) and the clean-container build ($clean) differ"
+            exit 1
+          fi
+          scripts/verify-reproducible.sh --self-test "$GITHUB_SHA"
       # A negative test is what makes the job mean something. Without it a green tick only says
       # "nothing private happened to be declared today", not "private things are rejected".
       - name: A dependency outside the repository must fail the build

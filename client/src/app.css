@@ -7,6 +7,12 @@
 @import "./themes/ocean.css";
 @import "./themes/midnight.css";
 
+/* Tests are not part of the app. Without this Tailwind collects class names from them too, and the
+   CSS then depends on whether the build context carries tests — docker/.dockerignore drops them, a
+   plain checkout does not — so the same commit would build two different stylesheets. */
+@source not "./**/*.test.ts";
+@source not "../e2e";
+
 @plugin "@tailwindcss/typography";
 
 @theme {

@@ -122,6 +122,9 @@
       },
     },
   },
+  "patchedDependencies": {
+    "@sveltejs/kit@2.70.3": "patches/@sveltejs%2Fkit@2.70.3.patch",
+  },
   "packages": {
     "@aarkue/tiptap-math-extension": ["@aarkue/tiptap-math-extension@1.4.0", "", { "dependencies": { "evaluatex": "^2.2.0", "katex": "^0.16.7" }, "peerDependencies": { "@tiptap/core": "^3.0.0", "@tiptap/pm": "^3.0.0" } }, "sha512-vCu/6WgO2yJ2cFnvsOL6kQCcWRWDm7OJ5I64KLyXIGGzIA2HuVhSyfuWeoNg51YVkEqlxZNTUgy0MXw6OTvrQg=="],
 

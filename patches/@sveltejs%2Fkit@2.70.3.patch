@@ -1,0 +1,27 @@
+diff --git a/src/core/sync/create_manifest_data/index.js b/src/core/sync/create_manifest_data/index.js
+index 6e97903682f448a9c95a01527530bd0bdb545174..f9dc0a81087542d452e8bd12877162d96f65eace 100644
+--- a/src/core/sync/create_manifest_data/index.js
++++ b/src/core/sync/create_manifest_data/index.js
+@@ -222,10 +222,18 @@ function create_routes_and_nodes(cwd, config, fallback) {
+ 
+ 			// We can't use withFileTypes because of a NodeJs bug which returns wrong results
+ 			// with isDirectory() in case of symlinks: https://github.com/nodejs/node/issues/30646
+-			const files = fs.readdirSync(dir).map((name) => ({
+-				is_dir: fs.statSync(path.join(dir, name)).isDirectory(),
+-				name
+-			}));
++			// ZKnotes patch (backport of the SvelteKit 3 fix): sort the entries, because `readdirSync`
++			// order is not guaranteed and differs between runtimes (Node returns entries
++			// alphabetically, Bun in directory order). Node indices are assigned from this
++			// traversal order, so without sorting the same source builds different bytes.
++			// Drop this patch when moving to @sveltejs/kit >= 3.
++			const files = fs
++				.readdirSync(dir)
++				.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
++				.map((name) => ({
++					is_dir: fs.statSync(path.join(dir, name)).isDirectory(),
++					name
++				}));
+ 
+ 			// process files first
+ 			for (const file of files) {

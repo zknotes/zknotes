@@ -7,7 +7,10 @@ WORKDIR /app
 # `shared` goes in whole rather than as a manifest: the server depends on it as `file:../shared`,
 # and bun copies a `file:` dependency at install time. Copied from a manifest-only directory, the
 # package would reach the image without its source and the API would die on its first import.
+# `patches/` too: the lockfile names the patched dependencies, and a frozen install refuses to run
+# without the patch files even when --production skips the package itself.
 COPY package.json bun.lock ./
+COPY patches patches
 COPY shared shared
 COPY server/package.json server/
 COPY client/package.json client/
