@@ -16,7 +16,14 @@
 #
 #   check_build_tools
 #
-# Prints what is missing (docker, git, tar) and returns 1; the callers turn that into exit 2.
+# Prints what is missing (docker, git, tar, a sha256 tool) and returns 1; the callers turn that
+# into exit 2.
+#
+#   sha256_file <file>
+#
+# The file's sha256 as 64 hex characters, with `sha256sum` (coreutils, BusyBox) or `shasum -a 256`
+# (macOS ships only the latter). scripts/tree-hash.sh carries the same two lines on its own, because
+# it is POSIX sh and runs inside the nginx image where nothing is sourced.
 
 LIB_BUILD_WEB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -28,7 +35,19 @@ check_build_tools() {
             missing=1
         fi
     done
+    if ! command -v sha256sum >/dev/null 2>&1 && ! command -v shasum >/dev/null 2>&1; then
+        echo "sha256sum (or shasum) is required" >&2
+        missing=1
+    fi
     return "$missing"
+}
+
+sha256_file() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | cut -d' ' -f1
+    else
+        shasum -a 256 "$1" | cut -d' ' -f1
+    fi
 }
 
 build_web_root() {
@@ -40,7 +59,9 @@ build_web_root() {
     tag="zknotes-web-build-$$-$RANDOM"
     # --no-cache: a cached layer would make a second build match the first by construction, which
     # proves nothing.
-    if git -C "$LIB_BUILD_WEB_ROOT" archive "$tree" | tar -x -C "$ctx" \
+    # No end-of-line conversion on the way out, whatever the verifier's git is configured to do:
+    # .gitattributes says the same for a checkout, and this covers a clone made before it existed.
+    if git -C "$LIB_BUILD_WEB_ROOT" -c core.autocrlf=false -c core.eol=lf archive "$tree" | tar -x -C "$ctx" \
         && docker build --no-cache -q \
             -f "$ctx/docker/Dockerfile.web" \
             --build-arg "APP_COMMIT=${app_commit}" \

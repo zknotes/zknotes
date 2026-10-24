@@ -24,6 +24,10 @@
 #   2 — usage or environment error
 
 set -euo pipefail
+# A failing command inside $(…) must stop that subshell too; bash leaves errexit off there unless
+# told otherwise (macOS' bash 3.2 does not know the option, and then the explicit checks below do
+# the work).
+shopt -s inherit_errexit 2>/dev/null || true
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TREE_HASH="${ROOT}/scripts/tree-hash.sh"
@@ -72,7 +76,10 @@ fi
 
 build() { # $1 = 1|2, $2 = SOURCE_DATE_EPOCH
     echo "▶ build $1 (SOURCE_DATE_EPOCH=$2) ..." >&2
-    build_web_root "$tree" "$app_commit" "$2" "$TMP/out-$1"
+    if ! build_web_root "$tree" "$app_commit" "$2" "$TMP/out-$1"; then
+        echo "✗ build $1 failed — see the docker output above" >&2
+        exit 2
+    fi
     sh "$TREE_HASH" --list "$TMP/out-$1" >"$TMP/list-$1"
     sh "$TREE_HASH" "$TMP/out-$1"
 }

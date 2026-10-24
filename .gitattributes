@@ -1,0 +1,5 @@
+# No end-of-line conversion for anything. `git archive` applies the same conversion a checkout
+# does, so with core.autocrlf=true (Git for Windows' default) the archive — and with it the web
+# build a verifier makes from it — would carry CRLF in the static files and give another treeHash
+# than CI. The bytes in the repository are the bytes in every checkout and every archive.
+* -text

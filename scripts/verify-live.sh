@@ -16,7 +16,7 @@
 #                    is still compared as a file, so an instance built from another commit (or
 #                    without APP_COMMIT) cannot match
 #
-# Requires bash, docker, git, curl, tar and sha256sum, and this repository as a git clone with the
+# Requires bash, docker, git, curl, tar and sha256sum (or shasum), and this repository as a git clone with the
 # public repository as `origin` (a commit the clone does not have is fetched from there). A full
 # check builds the client once (a few minutes) and then makes one request per file and per route.
 #
@@ -85,7 +85,6 @@ url="${url%/}"
 
 check_build_tools || exit 2
 command -v curl >/dev/null 2>&1 || { echo "curl is required" >&2; exit 2; }
-command -v sha256sum >/dev/null 2>&1 || { echo "sha256sum is required" >&2; exit 2; }
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -216,7 +215,7 @@ tree_hash="$(sh "$TREE_HASH" "$TMP/build")"
 total="$(wc -l <"$TMP/list")"
 total=$((total))
 echo "tree_hash=${tree_hash}"
-index_hash="$(sha256sum "$TMP/build/index.html" | cut -d' ' -f1)"
+index_hash="$(sha256_file "$TMP/build/index.html")"
 
 # ── 4. Fetch every file, `/` and the routes, and compare ───────────────────────
 ROUTES+=("verify-$(od -An -tx1 -N8 /dev/urandom | tr -d ' \n')")
@@ -233,7 +232,7 @@ compare() { # $1 = path as served ("" for /), $2 = expected sha256, $3 = label, 
         failed=$((failed + 1))
         return
     fi
-    got="$(sha256sum "$TMP/got" | cut -d' ' -f1)"
+    got="$(sha256_file "$TMP/got")"
     if [[ "$status" == "200" && "$got" == "$2" ]]; then
         match=$((match + 1))
         return

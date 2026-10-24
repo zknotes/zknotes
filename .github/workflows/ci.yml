@@ -28,9 +28,12 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same pull request cancels the older run: only its tip matters. A push to
+# main never cancels the previous one — every commit that reaches main as the tip of a push gets
+# its full run, and with it the published treeHash of its web build (the clean-build job below).
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   check:
@@ -106,6 +109,9 @@ jobs:
     # Four web image builds without cache (two for reproducibility, two for its self-test) on top of
     # the deployment images.
     timeout-minutes: 45
+    outputs:
+      # The treeHash of this commit's web build on x86-64, compared with the arm64 build below.
+      tree_hash: ${{ steps.repro.outputs.tree_hash }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # No setup-bun here on purpose: the build happens inside a container that gets nothing but
@@ -180,6 +186,7 @@ jobs:
       # hash with the one the server's deploy records, and a server can still send one visitor
       # something else. scripts/verify-reproducible.sh's header has the rest.
       - name: The web build is reproducible
+        id: repro
         run: |
           scripts/verify-reproducible.sh "$GITHUB_SHA" | tee "$RUNNER_TEMP/repro.log"
           repro="$(sed -n 's/^TREE_HASH=//p' "$RUNNER_TEMP/repro.log")"
@@ -188,6 +195,7 @@ jobs:
             echo "::error::the image build ($repro) and the clean-container build ($clean) differ"
             exit 1
           fi
+          echo "tree_hash=$repro" >> "$GITHUB_OUTPUT"
           scripts/verify-reproducible.sh --self-test "$GITHUB_SHA"
       # A negative test is what makes the job mean something. Without it a green tick only says
       # "nothing private happened to be declared today", not "private things are rejected".
@@ -211,3 +219,58 @@ jobs:
             exit 1
           fi
           git checkout -- client/package.json
+
+  # The same build on the other architecture people verify from. Docker Desktop on an Apple Silicon
+  # Mac pulls the arm64 variant of the digest-pinned builder image, and the JavaScript runtime is an
+  # input to the bytes (Vite turns some of its functions into source text), so "the same commit gives
+  # the same files wherever it is built" has to be measured on arm64 too, on every push — one build
+  # here, compared with the x86-64 hash above. Reproducibility itself (two builds, the self-test) is
+  # proven once, in the job above; this job proves the architecture is not an input.
+  clean-build-arm64:
+    name: Builds the same web root on arm64
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    outputs:
+      tree_hash: ${{ steps.build.outputs.tree_hash }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build inputs from the commit
+        run: |
+          echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)" >> "$GITHUB_ENV"
+          echo "APP_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+      - name: Build the web root once, through the shared build function
+        id: build
+        run: |
+          uname -m
+          source scripts/lib-build-web.sh
+          build_web_root "$GITHUB_SHA" "$APP_COMMIT" "$SOURCE_DATE_EPOCH" "$RUNNER_TEMP/web"
+          hash="$(sh scripts/tree-hash.sh "$RUNNER_TEMP/web")"
+          echo "TREE_HASH=$hash"
+          echo "tree_hash=$hash" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Reproducible web build (arm64)"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| commit | \`${APP_COMMIT}\` |"
+            echo "| SOURCE_DATE_EPOCH | \`${SOURCE_DATE_EPOCH}\` |"
+            echo "| treeHash | \`${hash}\` |"
+          } >>"$GITHUB_STEP_SUMMARY"
+
+  # The two architectures have to agree, or the claim in docs/verifying-the-build.md is false for
+  # everyone verifying from an arm64 machine.
+  same-bytes-on-both-architectures:
+    name: Same web root on x86-64 and arm64
+    runs-on: ubuntu-latest
+    needs: [clean-build, clean-build-arm64]
+    timeout-minutes: 5
+    steps:
+      - run: |
+          x86="${{ needs.clean-build.outputs.tree_hash }}"
+          arm="${{ needs.clean-build-arm64.outputs.tree_hash }}"
+          echo "x86-64: $x86"
+          echo "arm64:  $arm"
+          if [ -z "$x86" ] || [ "$x86" != "$arm" ]; then
+            echo "::error::the web build differs between x86-64 ($x86) and arm64 ($arm)"
+            exit 1
+          fi

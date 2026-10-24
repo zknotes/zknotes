@@ -62,9 +62,14 @@ function git(dir: string, ...args: string[]): string {
     return res.stdout.trim();
 }
 
-/** The stub build: no docker, the prepared web root, version.json from the commit it is given. */
+/**
+ * The stub build: no docker, the prepared web root, version.json from the commit it is given. It
+ * stands in for the whole of lib-build-web.sh, so it also has to provide the hash helper the script
+ * takes from there.
+ */
 const STUB_LIB = `
 check_build_tools() { return 0; }
+sha256_file() { sha256sum "$1" | cut -d' ' -f1; }
 build_web_root() {
     cp -r "$STUB_WEBROOT" "$4"
     printf '{"version":"%s"}' "$2" > "$4/_app/version.json"
