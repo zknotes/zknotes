@@ -20,8 +20,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
   Without the two variables the image still builds, using the clock as before.
 - Anyone can now check that a running instance serves the published code:
   `scripts/verify-live.sh <url>` builds the commit the instance reports, fetches every file of that
-  build from the instance and compares the bytes, naming any file that differs or is missing. What a
-  match proves and what it does not is written down in `docs/verifying-the-build.md`. With
+  build from the instance and compares the bytes, naming any file that differs or is missing. It
+  also opens the app the way a browser does — `/login`, a share link, a note, a random address —
+  and requires the same built shell from each, because that is where a server could hand out
+  different code. A difference always ends with exit code 1, even next to a request that failed, and
+  a compressed answer, an address that is not the instance root, or a clone without `origin` are
+  named as such instead of as a difference. What a match proves and what it does not is written
+  down in `docs/verifying-the-build.md`. With
   `VERIFY_URL` set, Settings → About shows a "Verify this build" link next to the commit; without it
   there is no link. The commit in About is now shown in a readable, copyable size, since it is what
   a user compares. `docker/setup.sh` and the commands in `docker/README.md` build with the full

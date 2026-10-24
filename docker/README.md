@@ -74,7 +74,7 @@ Edit `.env` and set at least:
 | `S3_ENDPOINT` | The **public `https://` address** of your object storage, e.g. `https://s3.example.com` — the browser uploads to it directly. Never a Docker service name or `localhost` (see [Object storage](#object-storage)). |
 | `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY` | From your storage provider. |
 | `SOURCE_URL` | Where the source of what this instance serves can be fetched. The example file sets it to `https://github.com/zknotes/zknotes`, which is right only while you run the code unmodified. If you change the client or the server, publish your version and put its address here (AGPL-3.0 §13). The app links to it from the sign-in, account-creation and shared-note pages and from Settings → About. |
-| `VERIFY_URL` | Optional. A page that tells your users how to check that this instance serves the published code (`../docs/verifying-the-build.md` explains the check). When set, Settings → About shows a *Verify this build* link next to the commit; unset, no link. |
+| `VERIFY_URL` | Optional. A page that tells your users how to check that this instance serves the published code (`../docs/verifying-the-build.md` explains the check). When set, Settings → About shows a *Verify this build* link next to the commit; unset, no link. Like every link here it is used as scheme, host and path; a query string or fragment is dropped. |
 
 Leave `DATABASE_URL` and `NODE_ENV` as they are: `docker-compose.yml` sets both for the API container
 (`DATABASE_URL=postgresql://zknotes:${POSTGRES_PASSWORD}@db:5432/zknotes`, `NODE_ENV=production`),

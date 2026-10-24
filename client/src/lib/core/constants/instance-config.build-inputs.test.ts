@@ -30,6 +30,10 @@ const FORBIDDEN_ENV_KEYS = [
     // is instance-specific — a build constant would show everyone the upstream.
     "SOURCE_URL",
     "VITE_SOURCE_URL",
+    // The verification page: a self-host without one must get no link, and that is decided per
+    // instance at runtime, never baked into the build.
+    "VERIFY_URL",
+    "VITE_VERIFY_URL",
 ];
 
 function sourceFiles(dir: string): string[] {
