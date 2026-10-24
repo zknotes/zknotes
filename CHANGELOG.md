@@ -18,6 +18,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
   `scripts/verify-reproducible.sh` runs the check, CI runs it on every push and publishes the hash,
   and `docker/README.md` ("Reproducing the web build") explains what it covers and what it does not.
   Without the two variables the image still builds, using the clock as before.
+- Anyone can now check that a running instance serves the published code:
+  `scripts/verify-live.sh <url>` builds the commit the instance reports, fetches every file of that
+  build from the instance and compares the bytes, naming any file that differs or is missing. What a
+  match proves and what it does not is written down in `docs/verifying-the-build.md`. With
+  `VERIFY_URL` set, Settings → About shows a "Verify this build" link next to the commit; without it
+  there is no link. The commit in About is now shown in a readable, copyable size, since it is what
+  a user compares. `docker/setup.sh` and the commands in `docker/README.md` build with the full
+  commit hash and the commit's timestamp, so an instance set up by them can be checked.
 
 ### Changed
 

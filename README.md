@@ -8,6 +8,8 @@ A hosted instance is available at [zknotes.eu](https://zknotes.eu).
 ## Documentation
 
 - **Running it** (Docker, environment variables, backups, TLS) → [`docker/README.md`](docker/README.md).
+- **Checking that an instance serves this code** (reproducible build, `scripts/verify-live.sh`, and
+  what that does and does not prove) → [`docs/verifying-the-build.md`](docs/verifying-the-build.md).
 - **Contributing** → [`CONTRIBUTING.md`](CONTRIBUTING.md). **Reporting a vulnerability** → [`SECURITY.md`](SECURITY.md).
 - **Bugs and feature requests** → [GitHub issues](https://github.com/zknotes/zknotes/issues).
 - **Per-package notes** → [`server/README.md`](server/README.md), [`client/README.md`](client/README.md), [`shared/README.md`](shared/README.md).

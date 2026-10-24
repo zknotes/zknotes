@@ -74,6 +74,7 @@ Edit `.env` and set at least:
 | `S3_ENDPOINT` | The **public `https://` address** of your object storage, e.g. `https://s3.example.com` — the browser uploads to it directly. Never a Docker service name or `localhost` (see [Object storage](#object-storage)). |
 | `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY` | From your storage provider. |
 | `SOURCE_URL` | Where the source of what this instance serves can be fetched. The example file sets it to `https://github.com/zknotes/zknotes`, which is right only while you run the code unmodified. If you change the client or the server, publish your version and put its address here (AGPL-3.0 §13). The app links to it from the sign-in, account-creation and shared-note pages and from Settings → About. |
+| `VERIFY_URL` | Optional. A page that tells your users how to check that this instance serves the published code (`../docs/verifying-the-build.md` explains the check). When set, Settings → About shows a *Verify this build* link next to the commit; unset, no link. |
 
 Leave `DATABASE_URL` and `NODE_ENV` as they are: `docker-compose.yml` sets both for the API container
 (`DATABASE_URL=postgresql://zknotes:${POSTGRES_PASSWORD}@db:5432/zknotes`, `NODE_ENV=production`),
@@ -141,9 +142,11 @@ down with it.
 ## 2. First deploy
 
 ```bash
-# Build images (takes ~2 min on first run). APP_COMMIT labels the build: /health and
-# Settings → About show it next to the version, which comes from package.json.
-APP_COMMIT=$(git rev-parse --short HEAD) docker compose build
+# Build images (takes ~2 min on first run). The two variables make the web build reproducible —
+# see "Reproducing the web build" below; /health and Settings → About show the commit next to the
+# version, which comes from package.json.
+export APP_COMMIT=$(git rev-parse HEAD) SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)
+docker compose build
 
 # Start all services. Caddy will obtain TLS certificates on first request.
 docker compose up -d
@@ -191,7 +194,8 @@ your notes — nobody, including you with database access, can recover the data 
 
 ```bash
 git pull
-APP_COMMIT=$(git rev-parse --short HEAD) docker compose build
+export APP_COMMIT=$(git rev-parse HEAD) SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)
+docker compose build
 docker compose up -d   # migrations run automatically on next API startup
 ```
 
@@ -207,32 +211,27 @@ still needs.
 
 ### Reproducing the web build
 
-The web image is built reproducibly: the same commit, built with the same two inputs, gives a
-byte-identical web root. That is what lets anyone check that a server sends the client this
-repository contains. The two inputs are:
+The web image builds reproducibly: the same commit with the same two inputs gives a byte-identical
+web root, so anyone can check that your instance serves the client this repository contains. What
+that check is, what it proves and what it does not is in
+[`../docs/verifying-the-build.md`](../docs/verifying-the-build.md); this section is only what you, as
+the operator, do about it.
 
-- `APP_COMMIT` — the **full** commit hash (`git rev-parse HEAD`). A short hash would do for a label,
-  but its length depends on your clone, and the value ends up in the bundle.
-- `SOURCE_DATE_EPOCH` — the commit's timestamp (`git show -s --format=%ct HEAD`), used instead of the
-  build time.
+- Build with both inputs, as the commands above do: `APP_COMMIT` must be the **full** hash (a short
+  one's length depends on the clone, and the value ends up in the bundle), `SOURCE_DATE_EPOCH` the
+  commit's timestamp. `setup.sh` sets both. Leave them unset and the image still builds, from the
+  clock — but then nobody, you included, can reproduce it, and `scripts/verify-live.sh` reports the
+  instance as unverifiable.
+- To print the hash of what your running image serves (the **treeHash**, the same number CI
+  publishes for the commit):
 
-Leave them unset and the image still builds — it takes the clock instead — but nobody can reproduce
-it. To build in the reproducible way and print the hash of what nginx will serve:
+  ```bash
+  docker compose run --rm --no-deps -T --entrypoint sh web -s /usr/share/nginx/html < ../scripts/tree-hash.sh
+  ```
 
-```bash
-export APP_COMMIT=$(git rev-parse HEAD) SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)
-docker compose build web
-docker compose run --rm --no-deps -T --entrypoint sh web -s /usr/share/nginx/html < ../scripts/tree-hash.sh
-```
-
-`scripts/verify-reproducible.sh [commit]` does the whole check from the repository root: it builds
-the image twice from `git archive`, without the layer cache, and requires the same hash. CI runs it on
-every push to `main` and writes the hash to the job summary.
-
-What this covers and what it does not: the claim holds for the digest-pinned builder image in
-`Dockerfile.web` (the Bun version is an input — Vite turns some functions into source text, and Bun
-transpiles them first), not for a local `vite build` under Node. And a matching hash for a commit
-does not by itself prove what one particular server sends to one particular visitor.
+- To check your own instance from the outside, as a user would: `scripts/verify-live.sh
+  https://notes.example.com` from the repository root.
+- `VERIFY_URL` (§1) puts a *Verify this build* link into Settings → About.
 
 ---
 

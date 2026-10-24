@@ -27,6 +27,10 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TREE_HASH="${ROOT}/scripts/tree-hash.sh"
+# The build itself (git archive → docker build → web root) lives in one place, shared with
+# scripts/verify-live.sh.
+# shellcheck source=lib-build-web.sh
+source "${ROOT}/scripts/lib-build-web.sh"
 
 self_test=0
 worktree=0
@@ -44,15 +48,10 @@ if [[ "$worktree" == 1 && -n "$ref" ]]; then
     exit 2
 fi
 
-command -v docker >/dev/null || { echo "docker is required" >&2; exit 2; }
+check_build_tools || exit 2
 
 TMP="$(mktemp -d)"
-TAG="zknotes-repro-$$"
-cleanup() {
-    docker rmi -f "${TAG}-1" "${TAG}-2" >/dev/null 2>&1 || true
-    rm -rf "$TMP"
-}
-trap cleanup EXIT
+trap 'rm -rf "$TMP"' EXIT
 
 # The source as a tree object. A commit is archived as is. The working tree goes through a temporary
 # index, so tracked edits and untracked (not ignored) files are included and the real index is left
@@ -72,22 +71,8 @@ else
 fi
 
 build() { # $1 = 1|2, $2 = SOURCE_DATE_EPOCH
-    # A different directory name per build: the checkout path must not reach the bytes either.
-    local ctx="$TMP/source-$1-$RANDOM"
-    mkdir -p "$ctx"
-    git -C "$ROOT" archive "$tree" | tar -x -C "$ctx"
     echo "▶ build $1 (SOURCE_DATE_EPOCH=$2) ..." >&2
-    # --no-cache: with the cache the second build would reuse the first one's layers and match by
-    # construction, which proves nothing.
-    docker build --no-cache -q \
-        -f "$ctx/docker/Dockerfile.web" \
-        --build-arg "APP_COMMIT=${app_commit}" \
-        --build-arg "SOURCE_DATE_EPOCH=$2" \
-        -t "${TAG}-$1" "$ctx" >/dev/null
-    local cid
-    cid="$(docker create "${TAG}-$1")"
-    docker cp "$cid:/usr/share/nginx/html" "$TMP/out-$1" >/dev/null
-    docker rm "$cid" >/dev/null
+    build_web_root "$tree" "$app_commit" "$2" "$TMP/out-$1"
     sh "$TREE_HASH" --list "$TMP/out-$1" >"$TMP/list-$1"
     sh "$TREE_HASH" "$TMP/out-$1"
 }

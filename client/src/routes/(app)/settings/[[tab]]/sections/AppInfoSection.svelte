@@ -11,11 +11,15 @@ let wwwUrl = $state<string | undefined>();
 // being served to them. A runtime value, because a modified instance has to point at
 // its own source.
 let sourceUrl = $state<string | undefined>();
+// Where the user learns how to check that this instance serves the published build. Runtime as
+// well: a self-host without a page of its own must not get a link to someone else's.
+let verifyUrl = $state<string | undefined>();
 
 onMount(() => {
     void loadInstancePublicConfig().then((cfg) => {
         wwwUrl = cfg.wwwUrl;
         sourceUrl = cfg.sourceUrl;
+        verifyUrl = cfg.verifyUrl;
     });
 });
 </script>
@@ -44,7 +48,9 @@ onMount(() => {
                     provided without any warranty.
                 </p>
                 <p class="text-xs text-[var(--text-muted)] mt-1">Build date: {new Date(__BUILD_DATE__).toLocaleString()}</p>
-                <p class="text-2xs font-mono text-[var(--text-muted)] opacity-50 mt-1">commit: {__COMMIT_HASH__}</p>
+                <!-- The full commit, readable and copyable: it is what a user compares with
+                     /_app/version.json and their own build when verifying the instance. -->
+                <p class="text-xs font-mono text-[var(--text-muted)] mt-1 break-all">commit: <span class="select-all" data-testid="about-commit">{__COMMIT_HASH__}</span></p>
             </div>
             <div class="flex gap-4 text-sm text-[var(--accent-color)]">
                 <a href="/help/changelog" class="hover:underline" id="about-changelog-btn">Changelog</a>
@@ -55,6 +61,9 @@ onMount(() => {
                 {/if}
                 {#if sourceUrl}
                     <a href={sourceUrl} target="_blank" rel="noopener noreferrer" class="hover:underline" id="about-source-btn">Source</a>
+                {/if}
+                {#if verifyUrl}
+                    <a href={verifyUrl} target="_blank" rel="noopener noreferrer" class="hover:underline" id="about-verify-btn">Verify this build</a>
                 {/if}
             </div>
         </div>

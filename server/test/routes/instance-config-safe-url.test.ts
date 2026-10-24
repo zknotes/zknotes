@@ -6,6 +6,7 @@ let app: Awaited<ReturnType<typeof buildApp>>;
 const saved = {
     www: process.env.PUBLIC_WWW_URL,
     manage: process.env.ACCOUNT_MANAGE_URL,
+    verify: process.env.VERIFY_URL,
     env: process.env.NODE_ENV,
 };
 
@@ -20,6 +21,8 @@ afterEach(() => {
     else process.env.PUBLIC_WWW_URL = saved.www;
     if (saved.manage === undefined) delete process.env.ACCOUNT_MANAGE_URL;
     else process.env.ACCOUNT_MANAGE_URL = saved.manage;
+    if (saved.verify === undefined) delete process.env.VERIFY_URL;
+    else process.env.VERIFY_URL = saved.verify;
     process.env.NODE_ENV = saved.env;
 });
 
@@ -35,6 +38,17 @@ describe("instance-config public links", () => {
 
         process.env.PUBLIC_WWW_URL = "not a url";
         expect((await config()).wwwUrl).toBeUndefined();
+    });
+
+    test("verifyUrl follows VERIFY_URL: present when valid, omitted when unsafe or unset", async () => {
+        process.env.VERIFY_URL = "https://zknotes.eu/verify/";
+        expect((await config()).verifyUrl).toBe("https://zknotes.eu/verify");
+
+        process.env.VERIFY_URL = "javascript:alert(1)";
+        expect((await config()).verifyUrl).toBeUndefined();
+
+        delete process.env.VERIFY_URL;
+        expect((await config()).verifyUrl).toBeUndefined();
     });
 
     test("plain http is allowed in development but omitted in production", async () => {

@@ -32,12 +32,17 @@ const instanceConfigRoutes: FastifyPluginAsync = async (fastify) => {
         // actually served to them. Runtime, not a build constant, and that is not a formality: an
         // instance that has **modified** the client must point at ITS OWN source, not at ours.
         const sourceUrl = safeUrl(process.env.SOURCE_URL);
+        // Where a user learns how to check that this instance serves the published build
+        // (docs/verifying-the-build.md). Settings → About shows "Verify this build" only when it is
+        // set: a self-host without a page of its own gets no link that would point at someone else's.
+        const verifyUrl = safeUrl(process.env.VERIFY_URL);
 
         return reply.send({
             // This is **runtime** data. The same build with a different `.env` has to yield
             // the same `manifestHash`, so none of it may enter the client bundle.
             ...(wwwUrl ? { wwwUrl } : {}),
             ...(sourceUrl ? { sourceUrl } : {}),
+            ...(verifyUrl ? { verifyUrl } : {}),
             ...(manageUrl ? { account: { manageUrl } } : {}),
         });
     });

@@ -34,6 +34,31 @@ describe("instance public config", () => {
         expect((await loadInstancePublicConfig()).sourceUrl).toBe("https://git.example/fork");
     });
 
+    it("loads verifyUrl when the instance offers a verification page, and drops an unsafe one", async () => {
+        // Settings → About shows "Verify this build" only with this link; a self-host without a page
+        // of its own gets none.
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockResolvedValue({
+                ok: true,
+                json: async () => ({ verifyUrl: "https://zknotes.example/verify" }),
+            }),
+        );
+        const { loadInstancePublicConfig } = await loadPublicWww();
+        expect((await loadInstancePublicConfig()).verifyUrl).toBe("https://zknotes.example/verify");
+
+        vi.resetModules();
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockResolvedValue({
+                ok: true,
+                json: async () => ({ verifyUrl: "javascript:alert(1)" }),
+            }),
+        );
+        const fresh = await loadPublicWww();
+        expect((await fresh.loadInstancePublicConfig()).verifyUrl).toBeUndefined();
+    });
+
     it("loads wwwUrl and account.manageUrl from GET /instance-config", async () => {
         const fetchMock = vi.fn().mockResolvedValue({
             ok: true,

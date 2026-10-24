@@ -394,9 +394,13 @@ check_dns() {
 
 start_stack() {
     step "Building and starting (the first build takes a few minutes)"
-    local commit
-    commit="$(git -C "$SETUP_DIR/.." rev-parse --short HEAD 2>/dev/null || echo dev)"
-    (cd "$SETUP_DIR" && APP_COMMIT="$commit" docker compose build && docker compose up -d)
+    # The full commit hash and its timestamp are what make the web build reproducible — the same
+    # inputs CI and scripts/verify-live.sh use, so the instance can be checked from the outside
+    # (docs/verifying-the-build.md). A checkout that is not a git clone builds with the clock.
+    local commit epoch
+    commit="$(git -C "$SETUP_DIR/.." rev-parse HEAD 2>/dev/null || echo dev)"
+    epoch="$(git -C "$SETUP_DIR/.." show -s --format=%ct HEAD 2>/dev/null || echo "")"
+    (cd "$SETUP_DIR" && APP_COMMIT="$commit" SOURCE_DATE_EPOCH="$epoch" docker compose build && docker compose up -d)
     say "  Waiting for the API…"
     for _ in $(seq 1 120); do
         if curl -fsS http://127.0.0.1:3000/health >/dev/null 2>&1; then

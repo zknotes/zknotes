@@ -11,6 +11,8 @@ export type InstancePublicConfig = {
     wwwUrl?: string;
     /** The Corresponding Source of what this instance serves (AGPL). */
     sourceUrl?: string;
+    /** Where a user learns how to check that this instance serves the published build. */
+    verifyUrl?: string;
     account?: { manageUrl?: string };
 };
 
@@ -40,6 +42,7 @@ function parseConfig(raw: unknown): InstancePublicConfig {
     const obj = raw as Record<string, unknown>;
     const wwwUrl = asPublicUrl(obj.wwwUrl);
     const sourceUrl = asPublicUrl(obj.sourceUrl);
+    const verifyUrl = asPublicUrl(obj.verifyUrl);
     const accountRaw = obj.account;
     const manageUrl =
         accountRaw && typeof accountRaw === "object"
@@ -48,6 +51,7 @@ function parseConfig(raw: unknown): InstancePublicConfig {
     return {
         ...(wwwUrl ? { wwwUrl } : {}),
         ...(sourceUrl ? { sourceUrl } : {}),
+        ...(verifyUrl ? { verifyUrl } : {}),
         ...(manageUrl ? { account: { manageUrl } } : {}),
     };
 }
