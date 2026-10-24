@@ -15,7 +15,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 - The web image now builds reproducibly: the same commit, built with `APP_COMMIT` set to the full
   commit hash and `SOURCE_DATE_EPOCH` to the commit's timestamp, gives a byte-identical web root, so
   anyone can check that a server sends the client this repository contains.
-  `scripts/verify-reproducible.sh` runs the check, CI runs it on every push and publishes the hash,
+  `scripts/verify-reproducible.sh` runs the check, CI runs it on every push — on x86-64 and on an
+  arm64 runner, which have to agree, so a build on an Apple Silicon Mac gives the same bytes — and
+  publishes the hash; a verifier's end-of-line git setting no longer changes the result either,
   and `docker/README.md` ("Reproducing the web build") explains what it covers and what it does not.
   Without the two variables the image still builds, using the clock as before.
 - Anyone can now check that a running instance serves the published code:

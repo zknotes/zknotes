@@ -7,7 +7,9 @@
 # The builder image is part of that claim: Vite turns some of its own functions into source text
 # with Function.prototype.toString(), and Bun transpiles modules as it loads them, so the Bun build
 # is an input to the bytes. Both images are therefore pinned by digest (the multi-arch index, so
-# arm64 still resolves). Refreshing a digest: `docker buildx imagetools inspect <image:tag>`.
+# arm64 still resolves — and CI builds on an arm64 runner too and requires the same treeHash as on
+# x86-64, so the architecture is measured, not assumed). Refreshing a digest:
+# `docker buildx imagetools inspect <image:tag>`.
 FROM oven/bun:1.4.2-alpine@sha256:d888c0ae6c86d7866ff10c5aafdd9077b36aee6455b33dd270fb93c0dd5cef6f AS builder
 
 WORKDIR /app

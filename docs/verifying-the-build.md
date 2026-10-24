@@ -145,7 +145,11 @@ The inputs to a build, and the only ones: the committed tree (filtered by
 [`.dockerignore`](../.dockerignore)), `APP_COMMIT` (the full commit hash, which names the version) and
 `SOURCE_DATE_EPOCH` (the commit's timestamp, used instead of the clock). The checkout path, the
 number of CPUs, the locale, the time zone and the instance's `.env` do not reach the bytes; the
-instance's own addresses arrive at runtime from `/instance-config`, not at build time.
+instance's own addresses arrive at runtime from `/instance-config`, not at build time. Nor does the
+CPU architecture: CI builds every commit on x86-64 and on arm64 (job *Builds the same web root on
+arm64*) and requires the same treeHash, so a build on an Apple Silicon Mac gives the same bytes.
+Nor does your git's end-of-line setting: `.gitattributes` turns conversion off for every file, and
+the build archives with it off regardless.
 
 ## When it does not match
 
