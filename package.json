@@ -24,7 +24,7 @@
     "devDependencies": {
         "@biomejs/biome": "^2.5.15",
         "knip": "^6.41.0",
-        "typescript": "^6.0.3"
+        "typescript": "^7.0.2"
     },
     "patchedDependencies": {
         "@sveltejs/kit@2.70.3": "patches/@sveltejs%2Fkit@2.70.3.patch"
