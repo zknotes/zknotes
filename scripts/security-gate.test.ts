@@ -5,6 +5,12 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
+// The two "passes on this repository" tests run a gate over the whole of client/src — a few grep
+// processes per file — which takes about three seconds here and more on a CI runner. They measure
+// that the gate accepts the repository, not how fast it does, so they get a timeout of their own
+// instead of vitest's five-second default, which a slow runner crossed.
+const WHOLE_REPOSITORY_TIMEOUT_MS = 30_000;
+
 /**
  * The two crypto-boundary gates are only worth having if they fail on the ways around them. Every
  * sample below runs through the real gate functions in a throwaway tree of its own; the bypasses
@@ -110,9 +116,13 @@ describe("crypto_primitives_gate", () => {
         expect(runGate("crypto_primitives_gate", root)).toBe(0);
     });
 
-    it("passes on this repository", () => {
-        expect(runGate("crypto_primitives_gate", ROOT)).toBe(0);
-    });
+    it(
+        "passes on this repository",
+        () => {
+            expect(runGate("crypto_primitives_gate", ROOT)).toBe(0);
+        },
+        WHOLE_REPOSITORY_TIMEOUT_MS,
+    );
 });
 
 describe("security_gate", () => {
@@ -205,7 +215,11 @@ describe("security_gate", () => {
         expect(runGate("security_gate", root)).toBe(0);
     });
 
-    it("passes on this repository", () => {
-        expect(runGate("security_gate", ROOT)).toBe(0);
-    });
+    it(
+        "passes on this repository",
+        () => {
+            expect(runGate("security_gate", ROOT)).toBe(0);
+        },
+        WHOLE_REPOSITORY_TIMEOUT_MS,
+    );
 });
