@@ -8,7 +8,7 @@
         "test": "DATABASE_URL=postgresql://zknotes:zknotes@localhost:5433/zknotes_test bun test --preload ./test/setup.ts"
     },
     "devDependencies": {
-        "@types/bun": "1.4.4",
+        "@types/bun": "1.4.2",
         "@types/ms": "^2.1.0",
         "@types/node": "26.6.5",
         "bun-types": "^1.4.4",

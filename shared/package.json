@@ -12,8 +12,8 @@
         "test": "vitest run"
     },
     "devDependencies": {
-        "@types/bun": "1.4.4",
-        "vitest": "^4.1.10"
+        "@types/bun": "1.4.2",
+        "vitest": "^4.1.12"
     },
     "peerDependencies": {
         "typescript": "^5 || ^6"

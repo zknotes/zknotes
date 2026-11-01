@@ -93,6 +93,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
   script now prints the command that loads the module first. If Docker still does not come back
   after a change the script made, it takes the change back out and starts Docker again.
 
+### Security
+
+- Dependencies updated for published advisories: DOMPurify 3.4.17, which cleans shared, imported
+  and exported HTML; Zod 4.6.7, which validates every request; Fastify 5.12.7 and, under it,
+  `fast-uri` and `ip-address`, the latter used by the per-address rate limits. The test tooling
+  (Vitest 4.1.12, happy-dom 21) is updated as well, though it never reaches an instance.
+
 ## [0.2.0] - 2026-10-17
 
 ### Added
