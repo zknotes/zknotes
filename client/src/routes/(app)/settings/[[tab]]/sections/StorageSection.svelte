@@ -243,12 +243,12 @@ onMount(loadStorageInfo);
             {
                 value: "never" as const,
                 label: "None (cloud only)",
-                desc: "New attachments stay in the cloud. You can still keep individual files on this device. Best for mobile to save data and storage.",
+                desc: "New attachments stay in the cloud, and images in a note wait for a tap. You can still keep individual files on this device. Saves the most data and storage.",
             },
             {
                 value: "small-only" as const,
                 label: `Only small files (< ${Math.round(SMALL_FILE_LIMIT_BYTES / 1024 / 1024)} MB)`,
-                desc: "Small files are kept on this device automatically; larger files stay in the cloud until you keep them. A good compromise.",
+                desc: "Small files, including the images in your notes, are kept on this device automatically; larger files stay in the cloud until you keep them. The default on phones and tablets.",
             },
         ] as option}
             <label class="flex items-start gap-3 p-4 rounded-xl border border-[var(--stroke)] hover:bg-[var(--surface-raised)]/50 cursor-pointer transition-colors {autoDownloadPolicy === option.value ? 'bg-[var(--accent-color)]/5 border-[var(--accent-color)]/30' : ''}">

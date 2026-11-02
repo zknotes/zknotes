@@ -48,6 +48,7 @@ vi.mock("$lib/modules/files/download", () => ({
 vi.mock("$lib/modules/files/blob-cache", () => ({ acquire: vi.fn(), release: vi.fn() }));
 vi.mock("$lib/modules/files/file-invalidator", () => ({
     onFileInvalidated: vi.fn(() => () => {}),
+    onFileLocal: vi.fn(() => () => {}),
 }));
 // The real upload-manager, with a spy on the abort the end of the grace calls (the other-tab check
 // sits in front of it).

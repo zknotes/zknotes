@@ -10,6 +10,13 @@ import { createKeyedChannel } from "./keyed-channel";
 
 const channel = createKeyedChannel();
 
+// "Every chunk of this file is now in the local cache" — a separate channel from the invalidation
+// one because the meaning is the opposite: the content did NOT change, it only became readable on
+// this device. An encFile NodeView sitting on the "not downloaded on this device" placeholder
+// re-resolves on it, whichever path brought the chunks in (the Info panel's "Load preview", a pin,
+// a tap on the placeholder itself, or another tab — the chunk cache is shared across tabs).
+const localChannel = createKeyedChannel();
+
 // ── A local-only notify (with no cross-tab broadcast) ───────────────────────────
 // The channel's receiver uses it, to avoid a re-broadcast and echo loops.
 function notifyLocal(fileId: string): void {
@@ -20,7 +27,8 @@ type BcMessage =
     | { type: "file-invalidated"; fileId: string }
     | { type: "file-moved"; fileId: string; toNoteId: string }
     | { type: "file-trashed"; fileId: string }
-    | { type: "file-restored"; fileId: string; toNoteId: string };
+    | { type: "file-restored"; fileId: string; toNoteId: string }
+    | { type: "file-local"; fileId: string };
 
 /** The window-level event NoteAutosave reconciles its baseline from (see APP_EVENTS.remoteFileRefsChanged). */
 function dispatchRemoteRefsChanged(fileId: string, toNoteId?: string): void {
@@ -51,6 +59,11 @@ function getChannel(): BroadcastChannel | null {
                 invalidateSilent(data.fileId as string);
                 notifyLocal(data.fileId as string);
             });
+            return;
+        }
+        if (data.type === "file-local" && typeof data.fileId === "string") {
+            // The other tab filled the shared chunk cache — our placeholders can resolve now.
+            localChannel.emit(data.fileId);
             return;
         }
         if (
@@ -143,6 +156,26 @@ export function ensureFilesBroadcastChannel(): void {
 export function onFileInvalidated(fileId: string, cb: () => void): () => void {
     ensureFilesBroadcastChannel();
     return channel.on(fileId, cb);
+}
+
+/**
+ * Subscribes to "every chunk of `fileId` is now cached on this device". The encFile NodeView uses it
+ * to leave the "not downloaded on this device" placeholder without a page refresh.
+ */
+export function onFileLocal(fileId: string, cb: () => void): () => void {
+    ensureFilesBroadcastChannel();
+    return localChannel.on(fileId, cb);
+}
+
+/**
+ * Tell the local listeners — and the other tabs, which share the chunk cache — that every chunk of
+ * `fileId` is now in `file-chunks`. Call it only when that is really true: after a full
+ * `decryptFile` that persisted, after a pin sync, or after a single-chunk peek. The fileId only,
+ * never key material or plaintext.
+ */
+export function notifyFileLocal(fileId: string): void {
+    localChannel.emit(fileId);
+    getChannel()?.postMessage({ type: "file-local", fileId } satisfies BcMessage);
 }
 
 /**

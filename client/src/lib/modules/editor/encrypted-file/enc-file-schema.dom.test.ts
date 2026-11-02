@@ -18,6 +18,7 @@ vi.mock("$lib/modules/files/blob-cache", () => ({
 }));
 vi.mock("$lib/modules/files/file-invalidator", () => ({
     onFileInvalidated: vi.fn(() => () => {}),
+    onFileLocal: vi.fn(() => () => {}),
 }));
 vi.mock("$lib/modules/files/upload-manager", () => ({
     abortPendingUpload: vi.fn(),

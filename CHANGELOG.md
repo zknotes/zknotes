@@ -52,6 +52,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ### Fixed
 
+- Images in a note now show up on phones and tablets. A device that is set not to download
+  attachments by itself used to show every image in a note as "could not load file", with no way
+  to fetch it from the note; only the file's Info panel could, and the note caught up after a
+  refresh. Now such an image, or any file the device has not downloaded, is shown as "not
+  downloaded on this device" in the space the image takes, and a tap loads it. Once the file is on
+  the device by any route (the tap, Info → Load preview, keeping it on the device, or another tab),
+  the note shows it at once. The default for new phones and tablets is also now "Only small files"
+  instead of "None", so the images in a note — which are scaled down on upload — load on their own,
+  while large attachments still wait for a tap. A choice already made in Settings → Storage is kept.
 - Search no longer forgets notes after a reload. When the app was reopened and another device had
   changed something meanwhile, the first sync could save a search index holding only the changed
   items over the complete one, so searching by content stopped finding the rest (titles still

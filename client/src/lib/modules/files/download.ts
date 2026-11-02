@@ -12,6 +12,7 @@ import { loadChunk } from "$lib/core/files/chunk-loader";
 import { fromBase64 } from "$lib/core/utils/base64";
 import { FileLifecycle } from "$lib/core/utils/file-lifecycle";
 import { decryptChunkTask } from "$lib/core/workers/crypto-rpc";
+import { notifyFileLocal } from "./file-invalidator";
 import { emitFilesChanged } from "./files-changed-bus";
 import { sniffKind } from "./sniff";
 
@@ -124,8 +125,10 @@ export async function peekSniffFile(
     const ciphertext = await loadChunk(chunkSetId, 0, nonce);
     const plain = await decryptChunkTask(itemId, chunkSetId, 0, totalChunks, ciphertext, nonce);
     // Chunk 0 is now cached; for a single-chunk file that means "every chunk is local" → refresh the
-    // presence badge. For a multi-chunk file the badge stays ☁️, because hasAllChunks returns false.
+    // presence badge and wake any placeholder waiting on it. For a multi-chunk file the badge stays
+    // ☁️, because hasAllChunks returns false.
     emitFilesChanged([itemId]);
+    if (totalChunks === 1) notifyFileLocal(itemId);
     return sniffKind(plain);
 }
 
@@ -189,8 +192,11 @@ export async function decryptFile(
         off += p.byteLength;
     }
 
-    // Every chunk is fetched and cached → refresh the presence badge.
+    // Every chunk is fetched and cached → refresh the presence badge, and tell the encFile
+    // placeholders ("not downloaded on this device") they can resolve now. A `persist: false`
+    // read (a backup, an export) left nothing in the cache, so it stays quiet.
     emitFilesChanged([itemId]);
+    if (persist) notifyFileLocal(itemId);
 
     const sniff = sniffKind(bytes);
     let blobMime = "application/octet-stream";

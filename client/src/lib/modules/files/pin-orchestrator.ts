@@ -4,6 +4,7 @@ import { evictChunkSet, loadChunk } from "$lib/core/files/chunk-loader";
 import { getPinnedRoots, pinManager } from "$lib/core/files/pin-manager-state.svelte";
 import { fromBase64 } from "$lib/core/utils/base64";
 import { getFilePayload } from "./download";
+import { notifyFileLocal } from "./file-invalidator";
 import { emitFilesChanged } from "./files-changed-bus";
 
 /**
@@ -108,6 +109,8 @@ export async function syncPinnedChunks(): Promise<void> {
                             await loadChunk(payload.chunkSetId, i, nonce);
                         }
                         emitFilesChanged([itemId]);
+                        // A note open on this file's placeholder can show it now.
+                        notifyFileLocal(itemId);
                     }
                 } catch (e) {
                     console.warn(`Failed to background sync chunks for pinned file ${itemId}:`, e);

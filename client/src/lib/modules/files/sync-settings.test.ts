@@ -44,19 +44,27 @@ describe("detectDefaultPolicy", () => {
         expect(detectDefaultPolicy()).toBe("always");
     });
 
-    it("returns never for narrow viewport (<768)", () => {
+    // Mobile defaults to "small-only", not "never": the inline images of a note are downscaled on
+    // upload and sit far below the threshold, so they render on their own; large attachments still
+    // wait for an explicit action.
+    it("returns small-only for narrow viewport (<768)", () => {
         vi.stubGlobal("window", { innerWidth: 375 });
-        expect(detectDefaultPolicy()).toBe("never");
+        expect(detectDefaultPolicy()).toBe("small-only");
     });
 
-    it("returns never for Android userAgent", () => {
+    it("returns small-only for Android userAgent", () => {
         vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (Linux; Android 14) Mobile" });
-        expect(detectDefaultPolicy()).toBe("never");
+        expect(detectDefaultPolicy()).toBe("small-only");
     });
 
-    it("returns never for iPhone userAgent", () => {
+    it("returns small-only for iPhone userAgent", () => {
         vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17)" });
-        expect(detectDefaultPolicy()).toBe("never");
+        expect(detectDefaultPolicy()).toBe("small-only");
+    });
+
+    it("returns small-only for iPad userAgent", () => {
+        vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X)" });
+        expect(detectDefaultPolicy()).toBe("small-only");
     });
 });
 
@@ -71,6 +79,22 @@ describe("getSyncSettings / setSyncSettings", () => {
     it("returns the policy that was written", () => {
         setSyncSettings({ autoDownload: "small-only" });
         expect(getSyncSettings().autoDownload).toBe("small-only");
+    });
+
+    it("a stored choice wins over the device default (a saved Never on a phone stays Never)", () => {
+        vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17)" });
+        ls.setItem("zknotes:sync-settings", JSON.stringify({ autoDownload: "never" }));
+        expect(getSyncSettings().autoDownload).toBe("never");
+        expect(shouldAutoDownload(1024)).toBe(false);
+    });
+
+    it("with nothing stored, a phone gets small-only and a desktop always", () => {
+        vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17)" });
+        expect(getSyncSettings().autoDownload).toBe("small-only");
+        expect(shouldAutoDownload(SMALL_FILE_LIMIT_BYTES)).toBe(true);
+        expect(shouldAutoDownload(SMALL_FILE_LIMIT_BYTES + 1)).toBe(false);
+        vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (Desktop)" });
+        expect(getSyncSettings().autoDownload).toBe("always");
     });
 
     it("setSyncSettings patches the existing settings rather than replacing them", () => {

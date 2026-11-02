@@ -12,7 +12,7 @@
 import { mergeAttributes, Node, type NodeViewRendererProps } from "@tiptap/core";
 import { NodeSelection } from "@tiptap/pm/state";
 import { APP_EVENTS } from "$lib/core/constants/events";
-import { onFileInvalidated } from "$lib/modules/files/file-invalidator";
+import { onFileInvalidated, onFileLocal } from "$lib/modules/files/file-invalidator";
 import { LOCAL_PREFIX } from "$lib/modules/files/refs";
 import { isRasterImageMime } from "$lib/modules/files/sniff";
 import {
@@ -22,7 +22,7 @@ import {
     subscribeUpload,
 } from "$lib/modules/files/upload-manager";
 import { CHIP_NAME_ATTR, makeFileChip, makePendingFileChip } from "./enc-file-chip";
-import { makeUploadOverlay } from "./enc-file-overlay";
+import { makeNotLocalCard, makeUploadOverlay } from "./enc-file-overlay";
 import { OverlaySlot } from "./enc-file-overlay-slot";
 import { ResizeController } from "./enc-file-resize";
 import { ToolbarController } from "./enc-file-toolbar";
@@ -41,8 +41,14 @@ import { ToolbarController } from "./enc-file-toolbar";
  * other way round, the stream / chip / unplayable branches return without acquiring at all, so a
  * release on them decrements ANOTHER consumer's ref (a grid card, the detail panel) and revokes the
  * URL out from under its live image.
+ *
+ * `opts.force` skips the device's auto-download policy — only for the user's own tap on the
+ * "not downloaded on this device" placeholder, never for an automatic render.
  */
-export async function resolveUrl(fileId: string): Promise<{
+export async function resolveUrl(
+    fileId: string,
+    opts?: { force?: boolean },
+): Promise<{
     url: string | null;
     owned: boolean;
     acquired?: boolean;
@@ -106,7 +112,7 @@ export async function resolveUrl(fileId: string): Promise<{
     }
 
     const { acquire } = await import("$lib/modules/files/blob-cache");
-    const { url } = await acquire(fileId);
+    const { url } = opts?.force ? await acquire(fileId, { force: true }) : await acquire(fileId);
     return { url, owned: false, acquired: true, name };
 }
 
@@ -377,6 +383,10 @@ export const EncFile = Node.create({
             // Registered after `disposed`, because `persistIntrinsicDims` reads it (the self-heal above).
             img.addEventListener("load", persistIntrinsicDims);
             let isDeleted = false;
+            // true while the node shows the "not downloaded on this device" placeholder — the
+            // chunks are not in the local cache and the policy did not fetch them. Only in this
+            // state does a `file-local` event re-resolve (an image already on screen stays put).
+            let notLocal = false;
             // true ONLY when the NodeView really rendered an <img> with a blob: URL (a raster).
             // It must NOT mean "has any URL at all" — a streamed video has a currentUrl, but Crop must
             // stay off.
@@ -438,17 +448,54 @@ export const EncFile = Node.create({
             };
 
             // When a replace or crop bumps the file's content, decrypt again for the new image.
+            // When the chunks arrive in the local cache by any path (Info → Load preview, a pin, a
+            // tap here, another tab), leave the "not downloaded" placeholder without a refresh.
             let unsubInvalidate: (() => void) | null = null;
+            let unsubLocal: (() => void) | null = null;
             const subscribeInvalidate = (fileId: string) => {
                 unsubInvalidate?.();
                 unsubInvalidate = null;
+                unsubLocal?.();
+                unsubLocal = null;
                 if (fileId.startsWith(LOCAL_PREFIX)) return;
                 unsubInvalidate = onFileInvalidated(fileId, () => {
                     if (!disposed && currentFileId === fileId) load(fileId);
                 });
+                unsubLocal = onFileLocal(fileId, () => {
+                    if (!disposed && currentFileId === fileId && notLocal) load(fileId);
+                });
             };
 
-            const load = (fileId: string | null, mime?: string | null) => {
+            // The "not downloaded on this device" placeholder, in the box the image would take
+            // (the same width/ratio reserveSpace gives the <img>), so a load causes no jump.
+            const renderNotLocal = (fileId: string, state: "idle" | "loading" | "error") => {
+                const iw = Number(node.attrs.w);
+                const ih = Number(node.attrs.h);
+                const hasDims = Number.isFinite(iw) && Number.isFinite(ih) && iw > 0 && ih > 0;
+                const userWidth = node.attrs.width as string | null;
+                showImg(false);
+                clearFileChip();
+                overlaySlot.render(
+                    makeNotLocalCard({
+                        state,
+                        isImage: isRasterImageMime(node.attrs.mime as string | null),
+                        width: userWidth ?? (hasDims ? `${iw}px` : null),
+                        aspectRatio: hasDims ? `${iw} / ${ih}` : null,
+                        // The user's tap is what allows the download — the policy is not bypassed
+                        // silently. The same path as the Info panel's "Load preview".
+                        onLoad: () => {
+                            if (disposed || currentFileId !== fileId) return;
+                            load(fileId, undefined, { force: true });
+                        },
+                    }),
+                );
+            };
+
+            const load = (
+                fileId: string | null,
+                mime?: string | null,
+                opts?: { force?: boolean },
+            ) => {
                 const seq = ++loadSeq;
                 revoke();
                 renderedAsImage = false;
@@ -458,6 +505,7 @@ export const EncFile = Node.create({
                 }
                 currentFileId = fileId;
                 isDeleted = false;
+                notLocal = false;
                 if (mime !== undefined) currentMime = mime;
                 // E2E + devtools: a stable selector on the wrapper (the img in the NodeView does not always carry the attribute).
                 if (fileId) dom.setAttribute("data-file-id", fileId);
@@ -513,9 +561,13 @@ export const EncFile = Node.create({
                     unsubscribe = subscribeUpload(localId, () => {
                         if (!disposed) renderOverlay(localId);
                     });
+                } else if (opts?.force) {
+                    // The user tapped the "not downloaded" placeholder — keep its box, with a
+                    // loading state, until the forced resolve settles.
+                    renderNotLocal(fileId, "loading");
                 }
 
-                resolveUrl(fileId)
+                resolveUrl(fileId, opts)
                     .then(({ url, owned, acquired, name, stream }) => {
                         // A newer load() (or a destroy) overtook us — discard what we just resolved.
                         if (disposed || seq !== loadSeq || currentFileId !== fileId) {
@@ -532,6 +584,11 @@ export const EncFile = Node.create({
                         currentOwned = owned;
                         currentAcquired = acquired === true;
                         renderedAsImage = false;
+                        if (opts?.force) {
+                            // The forced load settled — drop the loading card and show the image box again.
+                            overlaySlot.clear();
+                            showImg(true);
+                        }
 
                         if (name) lastResolvedName = name;
                         const displayName = name || node.attrs.alt || "File";
@@ -743,6 +800,17 @@ export const EncFile = Node.create({
                                       },
                             });
                             dom.appendChild(fileChip);
+                        } else if ((err as { name?: string })?.name === "FileNotLocalError") {
+                            // Not an error: the file is fine, only not in this device's cache and
+                            // the auto-download policy did not fetch it. Offer the tap, and wait for
+                            // `file-local` (subscribed in load()) in case another path fetches it.
+                            notLocal = true;
+                            renderNotLocal(fileId, "idle");
+                        } else if (opts?.force) {
+                            // The user's own fetch failed (offline, a server error) — keep the card
+                            // with a Retry instead of a dead alt text, and keep listening for the chunks.
+                            notLocal = true;
+                            renderNotLocal(fileId, "error");
                         } else {
                             img.alt = "⚠ could not load file";
                         }
@@ -805,6 +873,7 @@ export const EncFile = Node.create({
                         unsubscribe = null;
                     }
                     unsubInvalidate?.();
+                    unsubLocal?.();
                     overlaySlot.clear();
                     toolbar.clear();
                     clearFileChip();

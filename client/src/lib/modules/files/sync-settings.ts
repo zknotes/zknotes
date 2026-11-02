@@ -1,6 +1,6 @@
 // The per-device auto-download policy for file attachments (selective sync).
 // Storage: localStorage (a synchronous init, following the theme's pattern). Never to the server — every device
-// picks its own policy (a phone = Never, a desktop = Always).
+// picks its own policy (a phone = Small only, a desktop = Always).
 
 export type AutoDownloadPolicy = "always" | "never" | "small-only";
 
@@ -16,17 +16,27 @@ export const SMALL_FILE_LIMIT_BYTES =
     (Number(import.meta.env.VITE_FILE_SMALL_MB) || 5) * 1024 * 1024;
 
 /**
- * The heuristic: a mobile device (by userAgent or a narrow viewport) → "never", which saves data;
- * desktop → "always". The same breakpoint (768px) as layout.svelte.
+ * The heuristic: a mobile device (by userAgent or a narrow viewport) → "small-only", desktop →
+ * "always". The same breakpoint (768px) as layout.svelte.
+ *
+ * Mobile used to default to "never", which also blocked the inline images of a note — every one of
+ * them is downscaled on upload (modules/files/downscale.ts), so they sit far below
+ * SMALL_FILE_LIMIT_BYTES — and a note opened on a phone showed placeholders instead of its images.
+ * "small-only" lets those render on their own while large attachments still wait for an explicit
+ * action. "never" stays available as a choice; a policy the user picked is read first and this
+ * default applies only when nothing was ever saved.
  */
 export function detectDefaultPolicy(): AutoDownloadPolicy {
     if (typeof window === "undefined") return "always";
     const isMobileUA = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
     const isNarrowViewport = window.innerWidth < 768;
-    return isMobileUA || isNarrowViewport ? "never" : "always";
+    return isMobileUA || isNarrowViewport ? "small-only" : "always";
 }
 
-/** Reads the settings from localStorage; on a miss it returns the device default. */
+/**
+ * Reads the settings from localStorage; on a miss it returns the device default. A stored choice
+ * always wins over the default, so changing the default never overrides what a user picked.
+ */
 export function getSyncSettings(): SyncSettings {
     try {
         const raw = localStorage.getItem(STORAGE_KEY);
