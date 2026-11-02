@@ -298,21 +298,28 @@ export async function performDeleteAccount(password: string): Promise<void> {
     assertKdfParamsFloor(meData.kdf_params);
     const saltBytes = fromBase64(meData.kdf_salt);
 
-    let mk: Uint8Array | undefined;
-    let ak: Uint8Array | undefined;
-    try {
-        mk = await deriveMasterKey(password, saltBytes, meData.kdf_params);
-        ak = deriveAuthKey(mk);
+    // The shared teardown sequence (the same as logout) — core/services/session-service.ts.
+    // Under the "leaving on purpose" flag: once the vault is gone, a request that overlaps the
+    // teardown answers 401, and that must not start a second teardown whose redirect to the
+    // sign-in page races the caller's own navigation to the account area.
+    const { teardownSession, withVoluntaryTeardown } = await import(
+        "$lib/core/services/session-service"
+    );
+    await withVoluntaryTeardown(async () => {
+        let mk: Uint8Array | undefined;
+        let ak: Uint8Array | undefined;
+        try {
+            mk = await deriveMasterKey(password, saltBytes, meData.kdf_params);
+            ak = deriveAuthKey(mk);
 
-        await api.deleteAccount(toBase64(ak));
-    } finally {
-        if (mk) zeroize(mk);
-        if (ak) zeroize(ak);
-    }
+            await api.deleteAccount(toBase64(ak));
+        } finally {
+            if (mk) zeroize(mk);
+            if (ak) zeroize(ak);
+        }
 
-    // The shared teardown sequence (the same as logout) — core/services/session-service.ts
-    const { teardownSession } = await import("$lib/core/services/session-service");
-    await teardownSession();
+        await teardownSession();
+    });
 }
 
 /** Fetches the KDF parameters for display in the UI. */

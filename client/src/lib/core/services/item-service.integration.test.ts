@@ -202,6 +202,36 @@ describe("ItemService.duplicateItem", () => {
         expect(await (await getDB()).get("items", copy.id)).toBeDefined();
     });
 
+    // Regression: the copy's key used to be `${sort_order}b${Date.now()}` — 14 characters more per
+    // copy, so a chain of "Copy of Copy of…" reached the schema cap (256) after ~18 steps and the
+    // server refused the item for good.
+    it("places the copy right after the original, before its next sibling, with a short key", async () => {
+        await seed({ id: "note-src", type: "note", sort_order: "m" });
+        await seed({ id: "note-next", type: "note", sort_order: "n" });
+        await seed({ id: "other-folder", type: "note", parent_id: "f-other", sort_order: "m!" });
+
+        const { item: copy } = await ItemService.duplicateItem("note-src");
+
+        expect(copy.sort_order > "m" && copy.sort_order < "n").toBe(true);
+        expect(copy.sort_order).not.toMatch(/b\d{10,}/);
+        expect(copy.sort_order.length).toBeLessThan(6);
+    });
+
+    it("a chain of twenty copies keeps every key far below the schema cap", async () => {
+        await seed({ id: "note-src", type: "note", sort_order: "m" });
+        let sourceId = "note-src";
+        for (let i = 0; i < 20; i++) {
+            const { item: copy } = await ItemService.duplicateItem(sourceId);
+            sourceId = copy.id;
+        }
+        const db = await getDB();
+        const all = (await db.getAll("items")).filter((i) => i.parent_id === null);
+        expect(all).toHaveLength(21);
+        for (const item of all) expect(item.sort_order.length).toBeLessThan(40);
+        const sorted = [...all].sort((a, b) => (a.sort_order < b.sort_order ? -1 : 1));
+        expect(new Set(sorted.map((i) => i.sort_order)).size).toBe(21);
+    });
+
     it("strips encFile refs from duplicated note content", async () => {
         await seed({ id: "note-src", type: "note", sort_order: "a" });
         decryptItemPayload.mockResolvedValueOnce({
@@ -232,6 +262,46 @@ describe("ItemService.duplicateItem", () => {
         await expect(ItemService.duplicateItem("file-1")).rejects.toThrow(
             "Cannot duplicate a file",
         );
+    });
+});
+
+describe("ItemService — sibling sort_order rebalance", () => {
+    it("createItem re-keys a sibling list once a key has grown past the rebalance length", async () => {
+        const longKey = `a${"U".repeat(220)}`;
+        await seed({ id: "sib-long", type: "note", sort_order: longKey });
+        await seed({ id: "sib-short", type: "note", sort_order: "z" });
+        await seed({ id: "elsewhere", type: "note", parent_id: "f-other", sort_order: "q" });
+
+        const created = await ItemService.createItem(
+            "note",
+            null,
+            "Untitled",
+            `a${"U".repeat(221)}`,
+        );
+
+        const db = await getDB();
+        const siblings = (await db.getAll("items")).filter((i) => i.parent_id === null);
+        expect(siblings).toHaveLength(3);
+        for (const s of siblings) expect(s.sort_order.length).toBeLessThan(4);
+        // The order is preserved: long < created < short ("z").
+        const byId = new Map(siblings.map((s) => [s.id, s.sort_order]));
+        expect(byId.get("sib-long")! < byId.get(created.id)!).toBe(true);
+        expect(byId.get(created.id)! < byId.get("sib-short")!).toBe(true);
+        // The returned item carries its new key, and the other folder was left alone.
+        expect(created.sort_order).toBe(byId.get(created.id));
+        expect((await db.get("items", "elsewhere"))?.sort_order).toBe("q");
+        // Every re-keyed sibling is marked for push.
+        expect((await db.get("items", "sib-long"))?.dirty).toBe(true);
+        expect((await db.get("items", "sib-short"))?.dirty).toBe(true);
+    });
+
+    it("createItem leaves a list alone while its keys are short", async () => {
+        await seed({ id: "sib-a", type: "note", sort_order: "a" });
+        await ItemService.createItem("note", null, "Untitled", "b");
+
+        const db = await getDB();
+        expect((await db.get("items", "sib-a"))?.sort_order).toBe("a");
+        expect((await db.get("items", "sib-a"))?.dirty).toBe(false);
     });
 });
 

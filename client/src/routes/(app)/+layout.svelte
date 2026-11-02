@@ -15,7 +15,7 @@ import { QUERY_KEYS } from "$lib/core/constants/query-keys";
 import { QUICK_VIEWS, type QuickView, quickViewForPath } from "$lib/core/constants/views";
 import { deletedItemsQueryOptions, treeItemsQueryOptions } from "$lib/core/data/item-queries";
 import { countVisibleTrashItems, type DecryptedItemMeta } from "$lib/core/data/items";
-import { loadOrBuildIndex } from "$lib/core/search";
+import { loadPersistedIndex, rebuildIndex } from "$lib/core/search";
 import { ItemService } from "$lib/core/services/item-service";
 import { performLogout, restoreSession } from "$lib/core/services/session-service";
 import { activeSidebarId } from "$lib/core/stores/active-sidebar-id.svelte";
@@ -50,7 +50,13 @@ import { revealFolderInTree } from "$lib/core/utils/reveal-in-tree";
 import { createGlobalTreeKeyHandler } from "$lib/core/utils/tree-keyboard";
 import { onFilesChanged, onNotesChanged } from "$lib/modules/files/files-changed-bus";
 import { registerFilesBridge } from "$lib/modules/files/register-bridge";
-import { loadPersisted, savePersisted, STORAGE_KEYS } from "$lib/core/utils/persisted";
+import {
+    loadPersisted,
+    rawStringSerde,
+    savePersisted,
+    STORAGE_KEYS,
+} from "$lib/core/utils/persisted";
+import { APP_EVENTS } from "$lib/core/constants/events";
 
 let { children } = $props();
 
@@ -81,6 +87,16 @@ let syncPanelOpen = $state(false);
 let conflictInboxOpen = $state(false);
 // Confirm the logout while IDB still holds a non-terminal pending upload.
 let pendingUploadDialog = $state<{ count: number; kind: "uploads" | "unsynced" } | null>(null);
+// A different user signed in and the first sync has yet to sweep the previous user's rows
+// (pendingClearForUser). An item created before that sweep is unknown to the server and would be
+// swept away with them — the home page already refuses to create then; the sidebar buttons follow
+// the same gate. Re-read when the sweep finishes (vaultItemsChanged).
+let isPendingClear = $state(false);
+
+function checkPendingClear() {
+    isPendingClear =
+        loadPersisted(STORAGE_KEYS.pendingClearForUser, "false", rawStringSerde) === "true";
+}
 
 // The reactive counts from the tree items query
 const treeItemsQuery = createQuery(() => ({
@@ -162,6 +178,7 @@ function toggleSidebar() {
 }
 
 async function createItem(type: "note" | "folder") {
+    if (isPendingClear) return;
     try {
         const items = queryClient.getQueryData<DecryptedItemMeta[]>(QUERY_KEYS.treeItems) || [];
         const refId = activeSidebarId.current || page.params.id;
@@ -269,6 +286,9 @@ onMount(() => {
 
     recentNotesStore.init();
 
+    checkPendingClear();
+    window.addEventListener(APP_EVENTS.vaultItemsChanged, checkPendingClear);
+
     scheduler.attach();
 
     initServiceWorkerUpdate();
@@ -296,8 +316,41 @@ onMount(() => {
         // Anti-eviction: request durable IDB persistence once after the unlock.
         void requestPersistentStorage();
 
+        // The PERSISTED search index comes BEFORE the first sync — one blob, one decrypt, cheap.
+        // On a fresh crypto worker (a reload, a new browser session) the pull adds the changed
+        // items to the worker's index; with no index loaded those additions are dropped, and
+        // before the worker learned to refuse them they formed a partial index that the flush then
+        // persisted over the complete one. Loading first means the pull extends the complete
+        // index, as the design intends. The expensive rebuild (every item decrypted) stays AFTER
+        // the sync, where it always was: a cold start on a large vault must not hold the first
+        // screen for it, and a rebuild after the pull indexes everything the pull brought anyway.
+        let indexLoaded = false;
+        try {
+            indexLoaded = (await loadPersistedIndex()).loaded;
+        } catch (e) {
+            console.error("Search index load failed", e);
+        }
+        // A loaded index is searchable at once; otherwise the dialog stays disabled ("Building…")
+        // until the rebuild below has run.
+        if (indexLoaded) searchIndexStore.markReady();
+        if (unmounted) return;
+
         await scheduler.syncNow();
         if (unmounted) return;
+
+        if (!indexLoaded) {
+            searchIndexStore.startBuilding();
+            try {
+                await rebuildIndex((built, total) => {
+                    searchIndexStore.setProgress(built, total);
+                });
+            } catch (e) {
+                console.error("Search index rebuild failed", e);
+            } finally {
+                searchIndexStore.markReady();
+            }
+            if (unmounted) return;
+        }
 
         // Load the conflicts from IDB — the store is filled only when the sync engine detects a NEW
         // conflict (add()), so conflicts left from a previous session would be invisible without this
@@ -319,30 +372,23 @@ onMount(() => {
             m.resumeAllPendingUploads();
         });
 
-        searchIndexStore.startBuilding();
-        try {
-            await loadOrBuildIndex((built, total) => {
-                searchIndexStore.setProgress(built, total);
-            });
-        } catch (e) {
-            console.error("Search index init failed", e);
-        } finally {
-            searchIndexStore.markReady();
-        }
-        if (unmounted) return;
-
         scheduler.startBackground();
     })();
 
     return () => {
         unmounted = true;
         mobileQuery.removeEventListener("change", onMobileChange);
+        window.removeEventListener(APP_EVENTS.vaultItemsChanged, checkPendingClear);
         scheduler.stop();
     };
 });
 
 async function handleLogout() {
     utilityReturnStore.clear();
+    // The open editor can hold up to two minutes of typing that autosave has not written yet.
+    // Save it now, while the session cookie is still valid, so the push goes through as well —
+    // after performLogout the worker is locked and nothing can be encrypted any more.
+    await syncStore.flushUnsavedEdits();
     await performLogout();
     goto("/login");
 }
@@ -399,8 +445,11 @@ async function toggleLock() {
         pendingUploadDialog = { count: work.uploadsActive, kind: "uploads" };
         return;
     }
-    if (work.dirtyCount > 0) {
-        pendingUploadDialog = { count: work.dirtyCount, kind: "unsynced" };
+    // Text the open editor has not saved yet is unsynced work too: it is not in IndexedDB, so
+    // getUnsyncedWork cannot see it, and only the autosave's own flag knows about it.
+    const dirtyCount = Math.max(work.dirtyCount, syncStore.hasUnsavedEdits ? 1 : 0);
+    if (dirtyCount > 0) {
+        pendingUploadDialog = { count: dirtyCount, kind: "unsynced" };
         return;
     }
     locked = true;
@@ -544,6 +593,7 @@ function handleGlobalKeyDown(e: KeyboardEvent) {
                         variant="ghost"
                         size="icon"
                         onclick={() => createItem('note')}
+                        disabled={isPendingClear}
                         title="New note"
                         class="w-6 h-6 rounded-md bg-brand0/10 text-brand-fg"
                     >
@@ -553,6 +603,7 @@ function handleGlobalKeyDown(e: KeyboardEvent) {
                         variant="ghost"
                         size="icon"
                         onclick={() => createItem('folder')}
+                        disabled={isPendingClear}
                         title="New folder"
                         class="w-6 h-6 rounded-md border border-[var(--stroke-soft)] bg-[var(--surface-raised)] text-[var(--text-muted)]"
                     >

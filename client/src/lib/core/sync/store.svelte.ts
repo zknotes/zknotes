@@ -13,6 +13,18 @@ import { getUnsyncedWork } from "./unsynced-work";
  */
 const PENDING_COUNT_DEBOUNCE_MS = 50;
 
+/**
+ * One editor's view of its unsaved state: `isDirty` says whether edits are still outside
+ * IndexedDB, `flush` writes them now (and resolves once the write has landed or failed).
+ */
+type UnsavedEditsSource = {
+    isDirty: () => boolean;
+    flush?: () => Promise<void> | void;
+};
+
+/** How long a flush before lock/logout may take before the teardown goes on without it. */
+const FLUSH_UNSAVED_TIMEOUT_MS = 5_000;
+
 function createSyncStore() {
     let lastSyncAt = $state<number>(0);
     // The scheduler's cycle (startSync/endSync). `isSyncing` also counts the pushes in flight below.
@@ -36,10 +48,12 @@ function createSyncStore() {
     // Bulk operations (a full backup import, say) suspend push+pull so an in-flight sync cannot
     // overwrite freshly imported ciphertexts with old server state or a wrong-version applySucceeded.
     let suspended = $state<boolean>(false);
-    // Getters for unsaved editor state (NoteAutosave registers `isDirty || isSaving`). The store does
-    // not copy that state — it reads the getter, so NoteAutosave stays its one source of truth, and
-    // core does not import modules.
-    let unsavedSources = $state.raw<ReadonlyArray<() => boolean>>([]);
+    // Getters for unsaved editor state (NoteAutosave registers `isDirty || isSaving`), each with an
+    // optional flush that writes the pending edit now. The store does not copy that state — it
+    // reads the getter, so NoteAutosave stays its one source of truth, and core does not import
+    // modules. The flush is what lock, logout and the session teardown call before the worker is
+    // locked, so unsaved typing is not lost.
+    let unsavedSources = $state.raw<ReadonlyArray<UnsavedEditsSource>>([]);
 
     let pendingRefresh: Promise<void> | null = null;
 
@@ -81,19 +95,51 @@ function createSyncStore() {
         },
         /** True while an open note holds edits that are not in IndexedDB yet (autosave is pending or running). */
         get hasUnsavedEdits() {
-            return unsavedSources.some((source) => source());
+            return unsavedSources.some((source) => source.isDirty());
         },
         /**
-         * Registers a getter for unsaved editor state; returns the function that removes it again.
+         * Registers a getter for unsaved editor state, with an optional flush that saves those
+         * edits on demand; returns the function that removes it again.
          * The list is read untracked: callers register from an `$effect` (the note page mounts
          * NoteAutosave in one), and a tracked read there would make the effect depend on the very
          * list it writes — an infinite effect loop.
          */
-        registerUnsavedEdits(source: () => boolean): () => void {
+        registerUnsavedEdits(
+            isDirty: () => boolean,
+            flush?: () => Promise<void> | void,
+        ): () => void {
+            const source: UnsavedEditsSource = { isDirty, flush };
             unsavedSources = [...untrack(() => unsavedSources), source];
             return () => {
                 unsavedSources = untrack(() => unsavedSources).filter((s) => s !== source);
             };
+        },
+        /**
+         * Saves every registered editor's unsaved edits now — before a lock, a logout or a session
+         * teardown locks the crypto worker. Best-effort: a failing or hanging flush is logged and
+         * bounded by a timeout, so the teardown always goes on.
+         */
+        async flushUnsavedEdits(): Promise<void> {
+            const sources = untrack(() => unsavedSources);
+            const flushes = sources
+                .filter((s) => s.flush && s.isDirty())
+                .map(async (s) => {
+                    try {
+                        await s.flush?.();
+                    } catch (e) {
+                        console.error("Flushing unsaved edits failed", e);
+                    }
+                });
+            if (flushes.length === 0) return;
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            const timeout = new Promise<void>((resolve) => {
+                timer = setTimeout(resolve, FLUSH_UNSAVED_TIMEOUT_MS);
+            });
+            try {
+                await Promise.race([Promise.all(flushes), timeout]);
+            } finally {
+                clearTimeout(timer);
+            }
         },
         /**
          * Reads the current count from the mutation queue in IDB. Best-effort (a UI counter — it

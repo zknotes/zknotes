@@ -52,6 +52,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ### Fixed
 
+- Search no longer forgets notes after a reload. When the app was reopened and another device had
+  changed something meanwhile, the first sync could save a search index holding only the changed
+  items over the complete one, so searching by content stopped finding the rest (titles still
+  worked). The app now loads the stored index before the first sync and refuses to write a
+  partial index.
+- Locking the vault (the sidebar button or Ctrl/Cmd+Shift+Esc) and signing out now save the text
+  you are still typing first. Until now the lock only checked what was already saved on this
+  device, so up to two minutes of typing in the open note could be lost; unsaved text now also
+  counts as unsynced work in the confirmation shown before a lock, and is written to this device
+  even when the session expires.
+- Signing out while a file upload was still running could end on the sign-in page with a "your
+  session ended" message, as if the session had expired, and deleting the vault on the hosted
+  service could be sent to that page instead of back to the account area. Uploads are now
+  cancelled before the sign-out itself, and a request that still fails during a deliberate
+  sign-out no longer counts as an expired session.
+- Downloading a shared file no longer brings the file's decryption key out of the crypto worker
+  into the page; the chunks are decrypted inside the worker, the same way the vault's own files
+  are.
+- Moving an item to the top of a list many times over, or duplicating a note repeatedly (a chain of
+  "Copy of Copy of…"), used to grow the item's position marker until the server refused it, after
+  which the item stayed on this device only with a permanent sync error and "Retry failed items"
+  never helped. Positions now stay short, and a list whose markers have grown long is re-spaced
+  automatically.
 - Restoring from the trash, removing a star, deleting from the breadcrumb menu and a few other
   actions now show a message when they fail, instead of failing silently.
 - Settings that live only in this browser (date and time format, the outline panel, pinned
@@ -63,6 +86,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
   of a purged file, say), the blob's bytes now count against the quota again at once, as they
   already did when such a file was created; before, the files counter under-reported until the
   weekly repair.
+- Storage: a note, folder or file that was created and moved to the trash while offline, and only
+  then synced, is now counted under Trash from the moment it arrives. It used to be counted as a
+  live item, so emptying the trash could not release it and the live-items share stayed inflated
+  until the weekly repair. Replacing a file's content (a crop) in the same sync as moving it to the
+  trash, or while restoring it, now moves the old and the new bytes to the right share as well.
 - Search now lists files under their file name. A file that arrived by sync, or was indexed when
   the index was rebuilt, used to be indexed as "Untitled", so typing "unt" listed every file.
 - A session that expires while a backup is being restored now locks the vault and returns to

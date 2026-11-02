@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { calcDropSortOrder, calcInsertSortOrder, getMidString } from "./fractional-index";
+import {
+    calcDropSortOrder,
+    calcInsertSortOrder,
+    generateEvenSortOrders,
+    getMidString,
+    planSortOrderRebalance,
+    SORT_ORDER_MAX_LENGTH,
+    SORT_ORDER_REBALANCE_LENGTH,
+} from "./fractional-index";
 
 describe("getMidString", () => {
     it("(null, null) returns a non-empty string", () => {
@@ -81,6 +89,148 @@ describe("getMidString", () => {
         const midRight = getMidString(mid, last);
         expect(midRight > mid).toBe(true);
         expect(midRight < last).toBe(true);
+    });
+});
+
+// Regression: a prepend used to be `0${next}` and an append `${prev}z` — one more character per
+// operation, so dragging an item to the top of the same list ~250 times reached the schema cap
+// (256) and the server refused the item for good. A midpoint keeps the length until the digits
+// at every position are adjacent, so the growth is logarithmic.
+describe("getMidString — keys stay short", () => {
+    it("a prepend does not add a character while there is room below the first key", () => {
+        const first = "m";
+        const before = getMidString(null, first);
+        expect(before < first).toBe(true);
+        expect(before.length).toBe(1);
+    });
+
+    it("250 consecutive prepends stay far below the schema cap and keep the order", () => {
+        const keys = [getMidString(null, null)];
+        for (let i = 0; i < 250; i++) {
+            const key = getMidString(null, keys[0] ?? null);
+            expect(key < (keys[0] ?? "")).toBe(true);
+            keys.unshift(key);
+        }
+        for (const key of keys) expect(key.length).toBeLessThan(64);
+        const sorted = [...keys].sort();
+        expect(sorted).toEqual(keys);
+    });
+
+    it("250 consecutive appends stay far below the schema cap and keep the order", () => {
+        const keys = [getMidString(null, null)];
+        for (let i = 0; i < 250; i++) {
+            const last = keys[keys.length - 1] ?? null;
+            const key = getMidString(last, null);
+            expect(key > (last ?? "")).toBe(true);
+            keys.push(key);
+        }
+        for (const key of keys) expect(key.length).toBeLessThan(64);
+        expect([...keys].sort()).toEqual(keys);
+    });
+
+    it("250 midpoints between the same two neighbours stay below the schema cap", () => {
+        let lower = "a";
+        const upper = "b";
+        for (let i = 0; i < 250; i++) {
+            const mid = getMidString(lower, upper);
+            expect(mid > lower).toBe(true);
+            expect(mid < upper).toBe(true);
+            lower = mid;
+        }
+        expect(lower.length).toBeLessThan(SORT_ORDER_MAX_LENGTH);
+    });
+
+    it("a generated key never ends in the zero digit '!'", () => {
+        let next: string | null = getMidString(null, null);
+        for (let i = 0; i < 300; i++) {
+            next = getMidString(null, next);
+            expect(next.endsWith("!")).toBe(false);
+        }
+        let prev = "a";
+        for (let i = 0; i < 300; i++) {
+            prev = getMidString(prev, "b");
+            expect(prev.endsWith("!")).toBe(false);
+        }
+    });
+
+    it("the duplicate's key sits between the original and its next sibling", () => {
+        const original = "m";
+        const next = "n";
+        const copy = getMidString(original, next);
+        expect(copy > original && copy < next).toBe(true);
+        // A chain of "Copy of Copy of…" — each copy right after the previous one.
+        let last = copy;
+        for (let i = 0; i < 20; i++) {
+            const again = getMidString(last, next);
+            expect(again > last && again < next).toBe(true);
+            last = again;
+        }
+        expect(last.length).toBeLessThan(40);
+    });
+
+    it("equal neighbours (a conflict copy shares its original's key) still yield a key after prev", () => {
+        const key = getMidString("m", "m");
+        expect(key > "m").toBe(true);
+    });
+
+    it("legacy keys from the old scheme are still ordered correctly", () => {
+        // `0`-prefixed prepends, `z`-suffixed appends, `U` extensions and uuid-like keys.
+        const legacy = [
+            "000m",
+            "00m",
+            "0m",
+            "m",
+            "mU",
+            "mz",
+            "mzz",
+            "019a2b3c-7d8e-7f00-8000-000000000001",
+        ];
+        for (let i = 0; i < legacy.length - 1; i++) {
+            const a = legacy[i] ?? "";
+            const b = legacy[i + 1] ?? "";
+            if (a >= b) continue; // only ordered pairs are a valid input
+            const mid = getMidString(a, b);
+            expect(mid > a && mid < b).toBe(true);
+        }
+    });
+});
+
+describe("generateEvenSortOrders / planSortOrderRebalance", () => {
+    it("generates ascending, distinct, short keys that never end in '!'", () => {
+        for (const n of [1, 2, 10, 46, 47, 300, 2000]) {
+            const keys = generateEvenSortOrders(n);
+            expect(keys).toHaveLength(n);
+            expect(new Set(keys).size).toBe(n);
+            expect([...keys].sort()).toEqual(keys);
+            for (const k of keys) {
+                expect(k.length).toBeGreaterThan(0);
+                expect(k.length).toBeLessThanOrEqual(n <= 46 ? 1 : 2);
+                expect(k.endsWith("!")).toBe(false);
+            }
+        }
+        expect(generateEvenSortOrders(0)).toEqual([]);
+    });
+
+    it("plans nothing while every sibling key is short enough", () => {
+        const siblings = [
+            { id: "a", sort_order: "m" },
+            { id: "b", sort_order: "x".repeat(SORT_ORDER_REBALANCE_LENGTH) },
+        ];
+        expect(planSortOrderRebalance(siblings)).toBeNull();
+    });
+
+    it("re-keys the whole list in its current order once one key is too long", () => {
+        const siblings = [
+            { id: "c", sort_order: "t" },
+            { id: "a", sort_order: "a" },
+            { id: "b", sort_order: `a${"U".repeat(SORT_ORDER_REBALANCE_LENGTH)}` },
+        ];
+        const plan = planSortOrderRebalance(siblings);
+        expect(plan).not.toBeNull();
+        expect(plan?.map((p) => p.id)).toEqual(["a", "b", "c"]);
+        const keys = plan?.map((p) => p.sort_order) ?? [];
+        expect([...keys].sort()).toEqual(keys);
+        for (const k of keys) expect(k.length).toBeLessThan(4);
     });
 });
 

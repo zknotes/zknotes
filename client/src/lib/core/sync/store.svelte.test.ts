@@ -89,3 +89,56 @@ describe("syncStore.hasUnsavedEdits — registered sources", () => {
         offA();
     });
 });
+
+describe("syncStore.flushUnsavedEdits — the flush before lock, logout and teardown", () => {
+    it("runs the flush of every source that reports unsaved edits, and waits for it", async () => {
+        const store = await freshStore();
+        let dirtyFlushed = false;
+        const dirtyFlush = vi.fn(async () => {
+            await new Promise((r) => setTimeout(r, 5));
+            dirtyFlushed = true;
+        });
+        const cleanFlush = vi.fn(async () => {});
+        const offDirty = store.registerUnsavedEdits(() => true, dirtyFlush);
+        const offClean = store.registerUnsavedEdits(() => false, cleanFlush);
+
+        await store.flushUnsavedEdits();
+
+        expect(dirtyFlush).toHaveBeenCalledOnce();
+        expect(dirtyFlushed).toBe(true);
+        expect(cleanFlush).not.toHaveBeenCalled();
+        offDirty();
+        offClean();
+    });
+
+    it("a source without a flush, or a failing flush, does not break the others", async () => {
+        const store = await freshStore();
+        const ok = vi.fn(async () => {});
+        const offNoFlush = store.registerUnsavedEdits(() => true);
+        const offFailing = store.registerUnsavedEdits(
+            () => true,
+            async () => {
+                throw new Error("flush boom");
+            },
+        );
+        const offOk = store.registerUnsavedEdits(() => true, ok);
+
+        await expect(store.flushUnsavedEdits()).resolves.toBeUndefined();
+
+        expect(ok).toHaveBeenCalledOnce();
+        offNoFlush();
+        offFailing();
+        offOk();
+    });
+
+    it("an unregistered source is no longer flushed", async () => {
+        const store = await freshStore();
+        const flush = vi.fn(async () => {});
+        const off = store.registerUnsavedEdits(() => true, flush);
+        off();
+
+        await store.flushUnsavedEdits();
+
+        expect(flush).not.toHaveBeenCalled();
+    });
+});

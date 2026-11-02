@@ -4,7 +4,7 @@ import { FILE_LIMITS, viewProofB64FromFragmentKey } from "@zknotes/shared";
 import type { ShareAttachmentWire } from "$lib/core/api/shares";
 import { getShareChunk } from "$lib/core/api/shares";
 import { fromBase64 } from "$lib/core/utils/base64";
-import { decryptChunkWithKeyTask, unwrapAndDecryptShareTask } from "$lib/core/workers/crypto-rpc";
+import { decryptChunkTask, unwrapAndDecryptShareTask } from "$lib/core/workers/crypto-rpc";
 
 export type ShareDownloadProgress = {
     chunkIndex: number;
@@ -28,7 +28,9 @@ export async function downloadShareAttachment(args: {
     shareAuthKeyB64?: string;
     onProgress?: (p: ShareDownloadProgress) => void;
 }): Promise<{ bytes: Uint8Array; name: string; mime: string }> {
-    const { data: payload, itemKey } = await unwrapAndDecryptShareTask<FilePayload>({
+    // The Item Key stays inside the crypto worker, cached under the attachment's file id — the
+    // chunks below are decrypted through the same path the vault's own files use.
+    const { data: payload, itemKeyRetained } = await unwrapAndDecryptShareTask<FilePayload>({
         shareId: args.shareId,
         sourceItemId: args.attachment.file_id,
         wrappedItemKey: b64ToBytes(args.attachment.wrapped_item_key),
@@ -42,7 +44,7 @@ export async function downloadShareAttachment(args: {
         retainItemKey: true,
     });
 
-    if (!itemKey || payload.kind !== "file") {
+    if (!itemKeyRetained || payload.kind !== "file") {
         throw new Error("Invalid attachment");
     }
     // The free MAX_FILE_SIZE is a plan's upload limit; a share download has to allow the paid
@@ -59,38 +61,34 @@ export async function downloadShareAttachment(args: {
     const parts: Uint8Array[] = [];
     let totalLen = 0;
 
-    try {
-        for (let i = 0; i < totalChunks; i++) {
-            args.onProgress?.({ chunkIndex: i, totalChunks });
-            const nonce = fromBase64(chunks[i].nonce);
-            const chunkRes = await getShareChunk(
-                args.shareId,
-                args.attachment.file_id,
-                i,
-                args.shareAuthKeyB64,
-                viewProofB64,
-            );
-            if ("status" in chunkRes && chunkRes.status === "unavailable") {
-                throw new Error("Attachment is no longer available");
-            }
-            const cipherRes = await fetch((chunkRes as { url: string }).url, {
-                cache: "no-store",
-            });
-            if (!cipherRes.ok) throw new Error("Failed to fetch attachment chunk");
-            const ciphertext = new Uint8Array(await cipherRes.arrayBuffer());
-            const plain = await decryptChunkWithKeyTask(
-                itemKey,
-                chunkSetId,
-                i,
-                totalChunks,
-                ciphertext,
-                nonce,
-            );
-            parts.push(plain);
-            totalLen += plain.byteLength;
+    for (let i = 0; i < totalChunks; i++) {
+        args.onProgress?.({ chunkIndex: i, totalChunks });
+        const nonce = fromBase64(chunks[i].nonce);
+        const chunkRes = await getShareChunk(
+            args.shareId,
+            args.attachment.file_id,
+            i,
+            args.shareAuthKeyB64,
+            viewProofB64,
+        );
+        if ("status" in chunkRes && chunkRes.status === "unavailable") {
+            throw new Error("Attachment is no longer available");
         }
-    } finally {
-        itemKey.fill(0);
+        const cipherRes = await fetch((chunkRes as { url: string }).url, {
+            cache: "no-store",
+        });
+        if (!cipherRes.ok) throw new Error("Failed to fetch attachment chunk");
+        const ciphertext = new Uint8Array(await cipherRes.arrayBuffer());
+        const plain = await decryptChunkTask(
+            args.attachment.file_id,
+            chunkSetId,
+            i,
+            totalChunks,
+            ciphertext,
+            nonce,
+        );
+        parts.push(plain);
+        totalLen += plain.byteLength;
     }
 
     const bytes = new Uint8Array(totalLen);

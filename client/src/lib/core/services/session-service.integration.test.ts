@@ -80,6 +80,7 @@ import { getDB } from "$lib/core/db";
 import { chunkKey, putLocalChunk } from "$lib/core/db/file-chunks";
 import { fileBridge } from "$lib/core/events/file-bridge";
 import { authStore } from "$lib/core/stores/auth-store.svelte";
+import { syncStore } from "$lib/core/sync/store.svelte";
 import {
     attachVaultSessionChannel,
     handleUnauthorizedSession,
@@ -266,6 +267,102 @@ describe("session-service", () => {
         expect(logoutApi).toHaveBeenCalledOnce();
         expect(getStoredVaultKey()).toBeNull();
         expect(authStore.isAuthenticated).toBe(false);
+    });
+
+    // Lock and logout used to check only what was already in IndexedDB; the open editor's unsaved
+    // typing (autosave pending) was lost once the worker was locked. The teardown now runs the
+    // editors' registered flush first — before the generation rotates (executeSave refuses after
+    // a rotation) and before logoutWorker.
+    describe("unsaved editor text is flushed before the worker is locked", () => {
+        it("teardownSession awaits the registered flush before logoutWorker", async () => {
+            authStore.setAuthenticated(true);
+            authStore.setUnlocked(true);
+            storeVaultKey("dGVzdA=="); // binds this tab to the current generation
+            const order: string[] = [];
+            const flush = vi.fn(async () => {
+                await new Promise((r) => setTimeout(r, 5));
+                order.push("flush");
+            });
+            logoutWorker.mockImplementationOnce(async () => {
+                order.push("logoutWorker");
+            });
+            const unregister = syncStore.registerUnsavedEdits(() => true, flush);
+
+            await teardownSession();
+
+            expect(flush).toHaveBeenCalledOnce();
+            expect(order).toEqual(["flush", "logoutWorker"]);
+            expect(getStoredVaultKey()).toBeNull();
+            unregister();
+        });
+
+        it("a teardown after the generation has already rotated (a remote logout) does not try to save", async () => {
+            authStore.setAuthenticated(true);
+            authStore.setUnlocked(true);
+            storeVaultKey("dGVzdA==");
+            rotateSessionForUserChange(); // another tab moved the generation on
+            const flush = vi.fn(async () => {});
+            const unregister = syncStore.registerUnsavedEdits(() => true, flush);
+
+            await teardownSession({ broadcast: false });
+
+            expect(flush).not.toHaveBeenCalled();
+            expect(logoutWorker).toHaveBeenCalledOnce();
+            unregister();
+        });
+    });
+
+    // A request that overlaps a deliberate sign-out (an upload abort answered after the cookie was
+    // revoked, say) comes back 401. That used to start a second teardown and a hard redirect to
+    // `/login?error=session_ended` — as if the session had expired.
+    describe("a 401 during a voluntary teardown is not an expired session", () => {
+        it("handleUnauthorizedSession is a no-op while performLogout runs", async () => {
+            authStore.setAuthenticated(true);
+            authStore.setUnlocked(true);
+            storeVaultKey("dGVzdA==");
+            const assign = vi.fn();
+            vi.stubGlobal("location", { assign, pathname: "/notes", search: "" });
+            let finishServerLogout: () => void = () => {};
+            logoutApi.mockImplementationOnce(
+                () =>
+                    new Promise<void>((resolve) => {
+                        finishServerLogout = resolve;
+                    }),
+            );
+
+            const logoutRun = performLogout();
+            await vi.waitFor(() => expect(logoutApi).toHaveBeenCalledOnce());
+            handleUnauthorizedSession("expired"); // the straggling 401
+            finishServerLogout();
+            await logoutRun;
+
+            expect(logoutWorker).toHaveBeenCalledOnce();
+            expect(assign).not.toHaveBeenCalled();
+            expect(getStoredVaultKey()).toBeNull();
+            vi.unstubAllGlobals();
+        });
+
+        it("performLogout aborts the active upload sessions before the server logout", async () => {
+            const db = await getDB();
+            await db.put("pending-uploads", {
+                local_id: "loc-before-logout",
+                name: "f.png",
+                mime: "image/png",
+                note_id: null,
+                parent_id: null,
+                created_at: Date.now(),
+                chunk_set_id: "cs-before-logout",
+                phase: "uploading",
+            });
+            storeVaultKey("dGVzdA==");
+
+            await performLogout();
+
+            expect(abortUploadMock).toHaveBeenCalledWith("cs-before-logout");
+            const firstAbort = Math.min(...abortUploadMock.mock.invocationCallOrder);
+            const serverLogout = logoutApi.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY;
+            expect(firstAbort).toBeLessThan(serverLogout);
+        });
     });
 
     it("restoreSession unlocks from sessionStorage when worker ping fails", async () => {

@@ -290,12 +290,27 @@ export class NoteAutosave {
         }
     }
 
+    /**
+     * Saves the open note's unsaved text now and resolves once the write has landed (or failed).
+     * Registered with the sync store as the flush that lock, logout and the session teardown run
+     * before the crypto worker is locked — a SPA navigation to the sign-in page fires none of the
+     * unload events below, so without it up to AUTOSAVE_MAX_MS of typing was lost.
+     */
+    async flushPendingSave(): Promise<void> {
+        if (this.isDirty) {
+            const id = this.getCurrentNoteId();
+            if (id) this.executeSave(id, { forced: true });
+        }
+        if (this.#inFlightSave) await this.#inFlightSave;
+    }
+
     // Called from the component's mount to register beforeunload, visibilitychange, pagehide + the same-tab content baseline.
     // It also tells the sync chip about unsaved edits: the store reads this getter, so isDirty and
     // isSaving stay the one source of truth.
     mount(): () => void {
         const unregisterUnsaved = syncStore.registerUnsavedEdits(
             () => this.isDirty || this.isSaving,
+            () => this.flushPendingSave(),
         );
         const onBeforeUnload = (e: BeforeUnloadEvent) => {
             if (this.isDirty) {

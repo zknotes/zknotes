@@ -235,6 +235,60 @@ describe("NoteAutosave", () => {
         expect(syncStore.hasUnsavedEdits).toBe(false);
     });
 
+    // Lock, logout and the session teardown call syncStore.flushUnsavedEdits() before the crypto
+    // worker is locked; a SPA navigation to the sign-in page fires none of the unload events, so
+    // without this registered flush up to two minutes of typing was lost.
+    it("mount registers a flush: flushUnsavedEdits saves the dirty note and waits for the write", async () => {
+        const editor = track(makeEditor("<p>Typed just before lock</p>"));
+        const autosave = new NoteAutosave(
+            mockQueryClient(),
+            () => editor,
+            () => "n-flush",
+        );
+        let finishSave: () => void = () => {};
+        updateItemPayload.mockImplementationOnce(
+            () =>
+                new Promise<void>((resolve) => {
+                    finishSave = resolve;
+                }),
+        );
+        const unmount = autosave.mount();
+        autosave.markDirty();
+
+        let flushed = false;
+        const flushing = syncStore.flushUnsavedEdits().then(() => {
+            flushed = true;
+        });
+        await vi.waitFor(() => expect(updateItemPayload).toHaveBeenCalledOnce());
+        expect(updateItemPayload.mock.calls[0]?.[0]).toBe("n-flush");
+        expect(updateItemPayload.mock.calls[0]?.[2]).toContain("Typed just before lock");
+        // Still writing — the flush has not resolved.
+        await new Promise((r) => setTimeout(r, 0));
+        expect(flushed).toBe(false);
+
+        finishSave();
+        await flushing;
+        expect(flushed).toBe(true);
+        expect(autosave.isDirty).toBe(false);
+        expect(syncStore.hasUnsavedEdits).toBe(false);
+        unmount();
+    });
+
+    it("flushUnsavedEdits with nothing dirty writes nothing", async () => {
+        const editor = track(makeEditor("<p>Clean</p>"));
+        const autosave = new NoteAutosave(
+            mockQueryClient(),
+            () => editor,
+            () => "n-clean",
+        );
+        const unmount = autosave.mount();
+
+        await syncStore.flushUnsavedEdits();
+
+        expect(updateItemPayload).not.toHaveBeenCalled();
+        unmount();
+    });
+
     it("a note switch keeps the chip on unsaved while the old note's flush is still writing", async () => {
         const editor = track(makeEditor("<p>Old note</p>"));
         const autosave = new NoteAutosave(

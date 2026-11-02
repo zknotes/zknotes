@@ -436,13 +436,28 @@ export class CryptoWorkerClient {
         return res.payload;
     }
 
-    async addIndexDoc(doc: SearchDoc): Promise<void> {
-        await this.#send("ADD_INDEX_DOC", { doc }, ITEM_RPC_TIMEOUT_MS);
+    /**
+     * Resolves to whether the worker held an index to add to. `false` means no index is loaded yet
+     * (a fresh worker before loadPersistedIndex/buildIndex) and the document was NOT added — the
+     * worker never creates a partial index out of a stray add.
+     */
+    async addIndexDoc(doc: SearchDoc): Promise<boolean> {
+        const res = await this.#send<{ indexed: boolean } | undefined>(
+            "ADD_INDEX_DOC",
+            { doc },
+            ITEM_RPC_TIMEOUT_MS,
+        );
+        return res.payload?.indexed !== false;
     }
 
     /** The batch variant of addIndexDoc: N docs in ONE postMessage round trip. */
-    async addIndexDocs(docs: SearchDoc[]): Promise<void> {
-        await this.#send("ADD_INDEX_DOCS", { docs }, ITEM_RPC_TIMEOUT_MS);
+    async addIndexDocs(docs: SearchDoc[]): Promise<boolean> {
+        const res = await this.#send<{ indexed: boolean } | undefined>(
+            "ADD_INDEX_DOCS",
+            { docs },
+            ITEM_RPC_TIMEOUT_MS,
+        );
+        return res.payload?.indexed !== false;
     }
 
     async removeIndexDoc(docId: string): Promise<void> {
@@ -594,9 +609,14 @@ export class CryptoWorkerClient {
         kdfSaltB64?: string;
         kdfParams?: import("@zknotes/shared").KdfParams;
         version?: number;
+        /**
+         * Keep the unwrapped Item Key inside the worker, cached under `sourceItemId`, so the
+         * caller can decrypt the item's chunks through `decryptChunk(sourceItemId, …)`. The key
+         * itself never comes back to the main thread.
+         */
         retainItemKey?: boolean;
-    }): Promise<{ data: T; itemKey?: Uint8Array }> {
-        const res = await this.#send<{ data: T; itemKey?: number[] }>(
+    }): Promise<{ data: T; itemKeyRetained: boolean }> {
+        const res = await this.#send<{ data: T; itemKeyRetained?: boolean }>(
             "UNWRAP_AND_DECRYPT_SHARE",
             {
                 shareId: args.shareId,
@@ -616,36 +636,8 @@ export class CryptoWorkerClient {
         );
         return {
             data: res.payload.data,
-            itemKey: res.payload.itemKey ? fromBytes(res.payload.itemKey) : undefined,
+            itemKeyRetained: res.payload.itemKeyRetained === true,
         };
-    }
-
-    async decryptChunkWithKey(
-        itemKey: Uint8Array,
-        chunkSetId: string,
-        chunkIndex: number,
-        totalChunks: number,
-        ciphertext: Uint8Array,
-        nonce: Uint8Array,
-    ): Promise<Uint8Array> {
-        const buf = ciphertext.buffer.slice(
-            ciphertext.byteOffset,
-            ciphertext.byteOffset + ciphertext.byteLength,
-        ) as ArrayBuffer;
-        const res = await this.#send<{ plaintext: ArrayBuffer }>(
-            "DECRYPT_CHUNK_WITH_KEY",
-            {
-                itemKey: toBytes(itemKey),
-                chunkSetId,
-                chunkIndex,
-                totalChunks,
-                ciphertext: buf,
-                nonce: toBytes(nonce),
-            },
-            30 * SECOND_MS,
-            [buf],
-        );
-        return new Uint8Array(res.payload.plaintext);
     }
 }
 
@@ -786,11 +778,13 @@ export function buildIndexTask(docs: SearchDoc[]): Promise<{ count: number }> {
     return cryptoWorker.buildIndex(docs);
 }
 
-export function addIndexDocTask(doc: SearchDoc): Promise<void> {
+/** Resolves to false when no index is loaded in the worker yet (the doc was not added). */
+export function addIndexDocTask(doc: SearchDoc): Promise<boolean> {
     return cryptoWorker.addIndexDoc(doc);
 }
 
-export function addIndexDocsTask(docs: SearchDoc[]): Promise<void> {
+/** Resolves to false when no index is loaded in the worker yet (the docs were not added). */
+export function addIndexDocsTask(docs: SearchDoc[]): Promise<boolean> {
     return cryptoWorker.addIndexDocs(docs);
 }
 
@@ -862,25 +856,8 @@ export function unwrapAndDecryptShareTask<T>(args: {
     kdfSaltB64?: string;
     kdfParams?: import("@zknotes/shared").KdfParams;
     version?: number;
+    /** Cache the Item Key in the worker under `sourceItemId` for `decryptChunkTask(sourceItemId, …)`. */
     retainItemKey?: boolean;
-}): Promise<{ data: T; itemKey?: Uint8Array }> {
+}): Promise<{ data: T; itemKeyRetained: boolean }> {
     return cryptoWorker.sendUnwrapAndDecryptShare<T>(args);
-}
-
-export function decryptChunkWithKeyTask(
-    itemKey: Uint8Array,
-    chunkSetId: string,
-    chunkIndex: number,
-    totalChunks: number,
-    ciphertext: Uint8Array,
-    nonce: Uint8Array,
-): Promise<Uint8Array> {
-    return cryptoWorker.decryptChunkWithKey(
-        itemKey,
-        chunkSetId,
-        chunkIndex,
-        totalChunks,
-        ciphertext,
-        nonce,
-    );
 }

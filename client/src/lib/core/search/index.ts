@@ -39,8 +39,20 @@ let persistInFlight: Promise<void> | null = null;
 // 6") turns N implicit re-arms + a full-index reserialise per item into one explicit flush at the
 // end. Depth-counted so nested suspend/resume (a re-entrant pull) can't resume too early.
 let suspendDepth = 0;
+// Set by loadOrBuildIndex / rebuildIndex, reset by cancelPendingPersist (the session teardown).
+// Until the complete index is in the worker, nothing may be persisted: a delta pull that lands on
+// a fresh worker before the load would otherwise serialise a PARTIAL index (only the pulled
+// items) over the complete persisted one, and the next load would take that partial blob as
+// complete. The worker refuses to add to a missing index as well (ADD_INDEX_DOC → indexed: false).
+let indexLoaded = false;
+
+/** Whether the complete index has been loaded into the worker in this session (test hook). */
+export function isSearchIndexLoaded(): boolean {
+    return indexLoaded;
+}
 
 function markDirty() {
+    if (!indexLoaded) return;
     dirty = true;
     if (suspendDepth > 0) {
         // A flush is owed once resumeIndexPersistenceAndFlush runs — do not let an already-armed
@@ -77,7 +89,7 @@ export async function resumeIndexPersistenceAndFlush(): Promise<void> {
 
 /** Force the index to be written at once if it is dirty. Call it on visibilitychange === hidden. */
 export async function flushIndex(): Promise<void> {
-    if (!dirty) return;
+    if (!dirty || !indexLoaded) return;
     if (persistInFlight) return persistInFlight;
     if (persistTimer) {
         clearTimeout(persistTimer);
@@ -120,25 +132,39 @@ export async function flushIndex(): Promise<void> {
 export async function loadOrBuildIndex(
     onProgress?: (built: number, total: number) => void,
 ): Promise<{ rebuilt: boolean; count: number }> {
+    const persisted = await loadPersistedIndex();
+    if (persisted.loaded) return { rebuilt: false, count: persisted.count };
+    return rebuildIndex(onProgress);
+}
+
+/**
+ * The cheap half of `loadOrBuildIndex`: one encrypted blob out of IndexedDB and one decrypt in the
+ * worker, no walk over the items. The (app) layout runs it BEFORE the first sync — so a delta pull
+ * on a fresh worker extends the complete index instead of being dropped — and leaves the expensive
+ * `rebuildIndex` for after the sync, where it always was, so a cold start on a large vault does
+ * not wait for every item to be decrypted before the first screen. `loaded: false` means there is
+ * nothing usable in IndexedDB (missing, or unreadable and now deleted) and a rebuild is owed.
+ */
+export async function loadPersistedIndex(): Promise<
+    { loaded: true; count: number } | { loaded: false }
+> {
     const db = await getDB();
     const persisted = await db.get("search-index", INDEX_KEY);
-
-    if (persisted) {
-        try {
-            const { count } = await loadPersistedIndexTask({
-                ciphertext: new Uint8Array(persisted.ciphertext),
-                nonce: new Uint8Array(persisted.nonce),
-                ikCiphertext: new Uint8Array(persisted.ikCiphertext),
-                ikNonce: new Uint8Array(persisted.ikNonce),
-            });
-            return { rebuilt: false, count };
-        } catch (e) {
-            console.warn("Persisted search index unreadable — rebuilding", e);
-            await db.delete("search-index", INDEX_KEY);
-        }
+    if (!persisted) return { loaded: false };
+    try {
+        const { count } = await loadPersistedIndexTask({
+            ciphertext: new Uint8Array(persisted.ciphertext),
+            nonce: new Uint8Array(persisted.nonce),
+            ikCiphertext: new Uint8Array(persisted.ikCiphertext),
+            ikNonce: new Uint8Array(persisted.ikNonce),
+        });
+        indexLoaded = true;
+        return { loaded: true, count };
+    } catch (e) {
+        console.warn("Persisted search index unreadable — rebuilding", e);
+        await db.delete("search-index", INDEX_KEY);
+        return { loaded: false };
     }
-
-    return rebuildIndex(onProgress);
 }
 
 /**
@@ -178,6 +204,7 @@ export async function rebuildIndex(
     }
 
     const { count } = await buildIndexTask(docs);
+    indexLoaded = true;
     markDirty();
     return { rebuilt: true, count };
 }
@@ -206,13 +233,15 @@ export async function search(query: string, limit = 20): Promise<SearchHit[]> {
 }
 
 /** Cancels a pending debounce — call it on logout so the just-cleared worker index is not
- * accidentally serialised as "empty" over the stored blob. */
+ * accidentally serialised as "empty" over the stored blob. It also forgets that an index was
+ * loaded: the next session has to load (or rebuild) before anything is persisted again. */
 export function cancelPendingPersist(): void {
     if (persistTimer) {
         clearTimeout(persistTimer);
         persistTimer = null;
     }
     dirty = false;
+    indexLoaded = false;
 }
 
 /**

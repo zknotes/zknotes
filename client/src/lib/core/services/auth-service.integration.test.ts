@@ -98,6 +98,8 @@ vi.mock("$lib/core/services/session-service", () => ({
     teardownSession: teardownSessionMock,
     rotateSessionForUserChange: rotateSessionForUserChangeMock,
     runSessionTeardownHooks: runSessionTeardownHooksMock,
+    // The "leaving on purpose" wrapper is transparent here — the 401 handler it guards is not under test.
+    withVoluntaryTeardown: vi.fn((fn: () => Promise<unknown>) => fn()),
 }));
 
 import { getDB, type LocalItem } from "$lib/core/db";

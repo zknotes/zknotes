@@ -26,6 +26,7 @@ import { conflictStore } from "$lib/core/stores/conflict-store.svelte";
 import { dateTimeSettings } from "$lib/core/stores/datetime-settings.svelte";
 import { outlineStore } from "$lib/core/stores/outline.svelte";
 import { searchIndexStore } from "$lib/core/stores/search-index.svelte";
+import { syncStore } from "$lib/core/sync/store.svelte";
 import { fromBase64 } from "$lib/core/utils/base64";
 import {
     logoutWorker,
@@ -289,6 +290,19 @@ async function clearLocalSessionState(): Promise<void> {
 export async function teardownSession(opts: TeardownSessionOptions = {}): Promise<void> {
     const broadcast = opts.broadcast !== false;
 
+    // The open editor's unsaved text first, while the worker can still encrypt and the session
+    // generation is still this tab's (executeSave refuses after a rotation) — so a 401 or a
+    // remote-triggered teardown saves the text into IndexedDB rather than losing it. Only when
+    // the generation is still current: after a remote logout it has already rotated, and a save
+    // attempt would only raise the "different account" warning.
+    if (isVaultSessionCurrent()) {
+        try {
+            await syncStore.flushUnsavedEdits();
+        } catch (e) {
+            console.error("teardownSession: flushing unsaved edits failed", e);
+        }
+    }
+
     // Invalidate the generation and broadcast first — the other tabs then stop restoring at once.
     invalidateSessionGeneration();
     if (broadcast) broadcastVaultSessionChange("logout");
@@ -301,14 +315,46 @@ export async function teardownSession(opts: TeardownSessionOptions = {}): Promis
     authStore.logout();
 }
 
+// ── A voluntary teardown (logout, delete account) ───────────────────────────
+// While the user is leaving on purpose, a 401 from a request that overlaps the leaving (an upload
+// abort answered after the cookie was revoked, say) is not a session expiry: a second teardown
+// would rotate the generation and broadcast again, and the hard redirect to
+// `/login?error=session_ended` would race the caller's own navigation (the sign-in page, or the
+// account area after a vault deletion).
+
+let voluntaryTeardownInFlight = false;
+
+/** Runs `fn` with the "leaving on purpose" flag set, so the 401 handler stays out of the way. */
+export async function withVoluntaryTeardown<T>(fn: () => Promise<T>): Promise<T> {
+    voluntaryTeardownInFlight = true;
+    try {
+        return await fn();
+    } finally {
+        voluntaryTeardownInFlight = false;
+    }
+}
+
 /** Logout: the server-side session invalidation (best-effort) + the local teardown. */
 export async function performLogout(): Promise<void> {
-    try {
-        await logout();
-    } catch (e) {
-        console.error("Failed to logout on server", e);
-    }
-    await teardownSession();
+    await withVoluntaryTeardown(async () => {
+        // Abort the active upload sessions on the server while the cookie is still valid — after
+        // the server logout those DELETEs would come back 401.
+        try {
+            const { abortAllInFlightUploads, abortActiveUploadSessions } = await import(
+                "$lib/modules/files/upload-manager"
+            );
+            abortAllInFlightUploads();
+            await abortActiveUploadSessions();
+        } catch (e) {
+            console.error("Failed to abort upload sessions before logout", e);
+        }
+        try {
+            await logout();
+        } catch (e) {
+            console.error("Failed to logout on server", e);
+        }
+        await teardownSession();
+    });
 }
 
 // ── A 401/403 on a protected route ──────────────────────────────────────────
@@ -324,6 +370,9 @@ let unauthorizedTeardownInFlight = false;
  * and avoids a half-SPA state with the stores still unlocked.
  */
 export function handleUnauthorizedSession(reason?: "expired" | "locked"): void {
+    // Leaving on purpose (performLogout / performDeleteAccount): the teardown is already under
+    // way and the caller navigates itself — a 401 from an overlapping request is not an expiry.
+    if (voluntaryTeardownInFlight) return;
     // Single-flight only for the 401s arriving concurrently during the teardown; it resets in the
     // finally (for the tests, and for a possible soft navigation with no unload).
     if (unauthorizedTeardownInFlight) return;

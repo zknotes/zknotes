@@ -22,6 +22,7 @@ import { toBase64 } from "$lib/core/utils/base64";
 import { nowSec } from "$lib/core/utils/duration";
 import { escapeHtml } from "$lib/core/utils/dompurify";
 import { FileLifecycle } from "$lib/core/utils/file-lifecycle";
+import { getMidString, planSortOrderRebalance } from "$lib/core/utils/fractional-index";
 import { collectDescendants } from "$lib/core/utils/tree";
 import { encryptPayloadWithNewKeyTask, type SearchDoc } from "$lib/core/workers/crypto-rpc";
 import { stripAllFileRefsFromHtml } from "$lib/core/utils/file-refs";
@@ -415,7 +416,42 @@ export class ItemService {
         // 6. Fire-and-forget push to the server
         pushOrQueue(item);
 
+        // 7. A crowded sibling list (keys grown past the rebalance length) gets short keys again —
+        // the row just written included, so return what IndexedDB holds now.
+        if (await ItemService.rebalanceSiblingSortOrders(parentId)) {
+            return (await db.get("items", id)) ?? item;
+        }
         return item;
+    }
+
+    /**
+     * Resets a sibling list to short, evenly spaced sort_order keys once any key has grown past
+     * SORT_ORDER_REBALANCE_LENGTH — every prepend, duplicate or midpoint between adjacent keys
+     * can add a character, and the server refuses a key at the schema cap (256), after which the
+     * item would stay parked with `sync_error` for good. Siblings in the trash share the list and
+     * are rekeyed too; purged tombstones are not. Returns whether anything changed.
+     */
+    static async rebalanceSiblingSortOrders(parentId: string | null): Promise<boolean> {
+        const db = await getDB();
+        const all = await db.getAll("items");
+        const siblings = all.filter((i) => i.parent_id === parentId && !i.purged_at);
+        const changes = planSortOrderRebalance(siblings);
+        if (!changes || changes.length === 0) return false;
+
+        const tx = db.transaction("items", "readwrite");
+        const store = tx.objectStore("items");
+        const changed: LocalItem[] = [];
+        for (const change of changes) {
+            const item = await store.get(change.id);
+            if (!item) continue;
+            item.sort_order = change.sort_order;
+            touchForPush(item);
+            await store.put(item);
+            changed.push(item);
+        }
+        await tx.done;
+        for (const item of changed) pushOrQueue(item);
+        return changed.length > 0;
     }
 
     /**
@@ -467,6 +503,7 @@ export class ItemService {
         item.parent_id = newParentId;
         item.sort_order = newSortOrder;
         await ItemService.saveLocalMutationAndPush(item, store, tx);
+        await ItemService.rebalanceSiblingSortOrders(newParentId);
     }
 
     static async getDecryptedItem(id: string) {
@@ -629,11 +666,21 @@ export class ItemService {
         if (original.type === "file") throw new Error("Cannot duplicate a file");
 
         const title = `Copy of ${original.payload?.title || "Untitled"}`;
+        // Right after the original: a midpoint to its next sibling, not `${sort_order}b${Date.now()}`
+        // — that grew the key by 14 characters per copy, so a chain of "Copy of Copy of…" hit the
+        // schema cap after ~18 steps and the item was parked with a permanent sync error.
+        const db = await getDB();
+        const siblings = (await db.getAll("items"))
+            .filter((i) => i.parent_id === original.parent_id && !i.deleted_at && !i.purged_at)
+            .sort((a, b) =>
+                a.sort_order < b.sort_order ? -1 : a.sort_order > b.sort_order ? 1 : 0,
+            );
+        const nextSibling = siblings.find((i) => i.sort_order > original.sort_order);
         const newItem = await ItemService.createItem(
             original.type,
             original.parent_id,
             title,
-            `${original.sort_order}b${Date.now()}`,
+            getMidString(original.sort_order, nextSibling?.sort_order ?? null),
         );
 
         let strippedAttachments = 0;

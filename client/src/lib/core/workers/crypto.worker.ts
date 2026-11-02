@@ -373,45 +373,11 @@ async function handleMessage(event: MessageEvent, port: MessagePort | typeof sel
                 break;
             }
 
-            case "DECRYPT_CHUNK_WITH_KEY": {
-                const {
-                    itemKey: itemKeyBytes,
-                    chunkSetId,
-                    chunkIndex,
-                    totalChunks,
-                    ciphertext,
-                    nonce,
-                } = payload as {
-                    itemKey: number[];
-                    chunkSetId: string;
-                    chunkIndex: number;
-                    totalChunks: number;
-                    ciphertext: ArrayBuffer;
-                    nonce: number[];
-                };
-                const ik = new Uint8Array(itemKeyBytes);
-                const aad = buildChunkAad(chunkSetId, chunkIndex, totalChunks);
-                const plaintext = decryptChunk(
-                    new Uint8Array(ciphertext),
-                    new Uint8Array(nonce),
-                    ik,
-                    aad,
-                );
-                zeroize(ik);
-
-                const exactPlaintext = plaintext.slice();
-                port.postMessage(
-                    {
-                        id,
-                        type: "DECRYPT_CHUNK_WITH_KEY_SUCCESS",
-                        payload: { plaintext: exactPlaintext.buffer },
-                    },
-                    [exactPlaintext.buffer],
-                );
-                break;
-            }
-
+            // Every index mutation below requires the Vault Key, exactly like SERIALIZE_INDEX: a
+            // decrypt that finished before LOGOUT but whose index write lands after it must not
+            // resurrect plaintext titles and content inside a locked worker.
             case "BUILD_INDEX": {
+                if (!vaultKey) throw new Error("Worker not unlocked");
                 const { docs } = payload as { docs: SearchDoc[] };
                 miniSearch = new MiniSearch<SearchDoc>(MINISEARCH_CONFIG);
                 if (docs.length > 0) {
@@ -426,8 +392,18 @@ async function handleMessage(event: MessageEvent, port: MessagePort | typeof sel
             }
 
             case "ADD_INDEX_DOC": {
+                if (!vaultKey) throw new Error("Worker not unlocked");
+                // No index loaded yet (a fresh worker before LOAD_PERSISTED_INDEX / BUILD_INDEX):
+                // adding would create a NEW index holding only these documents, which a later
+                // flush then persists over the complete one. Report "not indexed" instead; the
+                // load that follows brings the complete index, and the caller decides what to do.
                 if (!miniSearch) {
-                    miniSearch = new MiniSearch<SearchDoc>(MINISEARCH_CONFIG);
+                    port.postMessage({
+                        id,
+                        type: "ADD_INDEX_DOC_SUCCESS",
+                        payload: { indexed: false },
+                    });
+                    break;
                 }
                 const { doc } = payload as { doc: SearchDoc };
                 if (miniSearch.has(doc.id)) {
@@ -435,7 +411,7 @@ async function handleMessage(event: MessageEvent, port: MessagePort | typeof sel
                 } else {
                     miniSearch.add(doc);
                 }
-                port.postMessage({ id, type: "ADD_INDEX_DOC_SUCCESS" });
+                port.postMessage({ id, type: "ADD_INDEX_DOC_SUCCESS", payload: { indexed: true } });
                 break;
             }
 
@@ -443,8 +419,14 @@ async function handleMessage(event: MessageEvent, port: MessagePort | typeof sel
                 // The batch variant of ADD_INDEX_DOC: N docs in ONE postMessage
                 // round trip instead of one per doc — used by the pull, which can touch hundreds of
                 // items on a single page.
+                if (!vaultKey) throw new Error("Worker not unlocked");
                 if (!miniSearch) {
-                    miniSearch = new MiniSearch<SearchDoc>(MINISEARCH_CONFIG);
+                    port.postMessage({
+                        id,
+                        type: "ADD_INDEX_DOCS_SUCCESS",
+                        payload: { indexed: false },
+                    });
+                    break;
                 }
                 const { docs } = payload as { docs: SearchDoc[] };
                 for (const doc of docs) {
@@ -454,11 +436,16 @@ async function handleMessage(event: MessageEvent, port: MessagePort | typeof sel
                         miniSearch.add(doc);
                     }
                 }
-                port.postMessage({ id, type: "ADD_INDEX_DOCS_SUCCESS" });
+                port.postMessage({
+                    id,
+                    type: "ADD_INDEX_DOCS_SUCCESS",
+                    payload: { indexed: true },
+                });
                 break;
             }
 
             case "REMOVE_INDEX_DOC": {
+                if (!vaultKey) throw new Error("Worker not unlocked");
                 const { docId } = payload as { docId: string };
                 if (miniSearch?.has(docId)) {
                     miniSearch.discard(docId);
@@ -746,13 +733,21 @@ async function handleMessage(event: MessageEvent, port: MessagePort | typeof sel
                     buildPayloadAad(sourceItemId, version),
                 );
 
-                const itemKeyOut = retainItemKey ? Array.from(itemKey) : undefined;
-                zeroize(itemKey);
+                // A share download needs the Item Key for every chunk. It stays HERE, in the same
+                // cache the vault's own items use (keyed by the shared item's id), and the caller
+                // decrypts the chunks through DECRYPT_CHUNK — the raw key never crosses to the
+                // main thread. The cache owns the buffer from now on (LRU eviction and
+                // wipeSessionSecrets zeroize it); without retention it is zeroized at once.
+                if (retainItemKey) {
+                    itemKeys.set(sourceItemId, itemKey);
+                } else {
+                    zeroize(itemKey);
+                }
 
                 port.postMessage({
                     id,
                     type: "UNWRAP_AND_DECRYPT_SHARE_SUCCESS",
-                    payload: { data, itemKey: itemKeyOut },
+                    payload: { data, itemKeyRetained: retainItemKey === true },
                 });
                 break;
             }
