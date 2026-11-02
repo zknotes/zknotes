@@ -128,8 +128,8 @@ if [[ ! -f "$ENV_FILE" ]]; then
     echo "   Create it from the template:"
     echo "     cp server/.env.example server/.env"
     echo "   The template's defaults already point at the local dev setup (the DB on 5434, Garage on 9000)."
-    echo "   COOKIE_SECRET and KDF_FAKE_SEED are placeholders — fine in dev; for production"
-    echo "   generate them with: openssl rand -hex 32"
+    echo "   KDF_FAKE_SEED is a placeholder — fine in dev; for production"
+    echo "   generate it with: openssl rand -hex 32"
     exit 1
 fi
 

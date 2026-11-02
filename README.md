@@ -54,9 +54,9 @@ cp server/.env.example server/.env
 # no changes needed for local dev.
 ```
 
-In development `COOKIE_SECRET` and `KDF_FAKE_SEED` can stay as they are (unset, they fall back to a
-built-in dev default). Production refuses to start while either is unset, still the
-`REPLACE_WITH_…` placeholder or the dev default — generate real values with `openssl rand -hex 32`.
+In development `KDF_FAKE_SEED` can stay as it is (unset, it falls back to a built-in dev default).
+Production refuses to start while it is unset, still the `REPLACE_WITH_…` placeholder or the dev
+default — generate a real value with `openssl rand -hex 32`.
 
 ### 3. Run
 
@@ -74,7 +74,7 @@ Or two terminals, if you want them separate:
 # (server/.env says NODE_ENV=production; the variable on the command line wins)
 cd server && bunx drizzle-kit migrate && NODE_ENV=development bun --watch index.ts
 
-# Terminal 2 — Web on :5173
+# Terminal 2 — Web on :5173 (localhost only; VITE_DEV_HOST=0.0.0.0 to reach it from a phone)
 cd client && bun run dev
 ```
 

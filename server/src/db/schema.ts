@@ -42,6 +42,10 @@ const nowEpoch = sql`extract
     (epoch from now())
     ::bigint`;
 
+// 32 hex characters from the database itself, so a row inserted anywhere gets a prefix nobody can
+// guess; the application never derives it from the user id.
+const randomStoragePrefix = sql`replace(gen_random_uuid()::text, '-', '')`;
+
 /**
  * The `users` table holds each user's basic data, their cryptographic parameters for
  * authentication, and their storage usage.
@@ -63,6 +67,14 @@ export const users = pgTable(
     {
         id: text("id").primaryKey(), // UUIDv7
         email: text("email").notNull(),
+        /**
+         * The random segment of this user's S3 keys (`u/<storage_prefix>/<chunkSetId>/<index>`).
+         * It used to be the user id, which every presigned URL handed to an anonymous share
+         * recipient then revealed. Rows from before the column keep their id as the prefix, so
+         * their objects stay where they are. Copied onto each upload session and chunk set, because
+         * the chunk set outlives the user row and GC deletes the objects by it.
+         */
+        storage_prefix: text("storage_prefix").notNull().default(randomStoragePrefix),
         auth_key_hash: text("auth_key_hash").notNull(),
         kdf_salt: bytea("kdf_salt").notNull(), // 16B
         kdf_params: text("kdf_params").notNull(), // JSON string
@@ -99,9 +111,9 @@ export const users = pgTable(
         failed_window_started_at: epochSeconds("failed_window_started_at"),
         // Denormalised; it does not depend on session retention or deletion at logout.
         last_seen_at: epochSeconds("last_seen_at"),
-        // Clickwrap Terms acceptance at registration. NULL = registered before it was introduced
-        // (test accounts were backfilled by hand; a production re-acceptance mechanism has not been
-        // built yet).
+        // Which Terms version the account accepted, and when. The core has no Terms of its own —
+        // an extension that runs a hosted service writes these when it creates the vault; on a
+        // self-host they stay NULL.
         accepted_terms_version: text("accepted_terms_version"),
         accepted_terms_at: epochSeconds("accepted_terms_at"),
     },
@@ -112,6 +124,7 @@ export const users = pgTable(
         // normalised sign-in can only ever find one of them. Declared here so the
         // table and the hand-written migration cannot drift apart.
         uniqueIndex("users_email_lower_idx").on(sql`lower(${table.email})`),
+        uniqueIndex("users_storage_prefix_idx").on(table.storage_prefix),
         // A partial index — for the `locked_users` aggregate an extension's dashboard reads
         index("users_locked_at_idx").on(table.locked_at).where(sql`${table.locked_at} IS NOT NULL`),
         // Fast clearing of expired locks, and diagnostics for active backoff locks.
@@ -143,6 +156,29 @@ export const loginFailures = pgTable(
         primaryKey({ columns: [table.user_id, table.source] }),
         // The GC sweep of runs whose window has lapsed.
         index("login_failures_window_idx").on(table.window_started_at),
+    ],
+);
+
+/**
+ * Failed share-password checks per share and source (the same split as `login_failures`): the lock
+ * that stops a guessing run is scoped to the source, so one recipient cannot lock a link for every
+ * other recipient; `share_links.failed_*` stays as the per-share backstop with a far higher
+ * threshold.
+ */
+export const shareFailures = pgTable(
+    "share_failures",
+    {
+        share_id: text("share_id")
+            .notNull()
+            .references(() => shareLinks.id, { onDelete: "cascade" }),
+        source: text("source").notNull(),
+        failed_attempts: integer("failed_attempts").notNull().default(0),
+        window_started_at: epochSeconds("window_started_at").notNull(),
+        locked_until: epochSeconds("locked_until"),
+    },
+    (table) => [
+        primaryKey({ columns: [table.share_id, table.source] }),
+        index("share_failures_window_idx").on(table.window_started_at),
     ],
 );
 
@@ -266,6 +302,8 @@ export const uploadSessions = pgTable(
         user_id: text("user_id")
             .notNull()
             .references(() => users.id, { onDelete: "cascade" }),
+        /** The owner's `users.storage_prefix` at open — the S3 keys of this session live under it. */
+        storage_prefix: text("storage_prefix").notNull().default(randomStoragePrefix),
         expected_chunks: integer("expected_chunks").notNull(),
         total_size: bigint("total_size", { mode: "number" }).notNull(),
         /** Per-chunk ciphertext sizes — needed for the lazy mint of presigned PUT URLs. */
@@ -332,6 +370,8 @@ export const chunkSets = pgTable(
     {
         id: text("id").primaryKey(), // = upload_sessions.id / chunk_set_id
         user_id: text("user_id").notNull(),
+        /** The S3 key segment the objects live under; it survives the user row (see users.storage_prefix). */
+        storage_prefix: text("storage_prefix").notNull().default(randomStoragePrefix),
         chunk_count: integer("chunk_count").notNull(),
         total_size: bigint("total_size", { mode: "number" }).notNull(),
         pending_delete_at: epochSeconds("pending_delete_at"), // null = live; set = waiting for the sweep

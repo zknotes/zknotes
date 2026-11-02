@@ -39,6 +39,11 @@ let showSharePassword = $state(false);
 let includeAttachments = $state(false);
 /** The concrete TTL limit from the server; `0` until the answer arrives (feature-off). */
 let maxShareTtlSec = $state(0);
+/** How long a one-time link keeps serving attachments after it is opened; `0` until the answer arrives. */
+let burnGraceSec = $state(0);
+/** The least a share password may have — about 850 guesses a day get through the lockout. */
+const SHARE_PASSWORD_MIN_LENGTH = 8;
+const passwordTooShort = $derived(usePassword && password.length < SHARE_PASSWORD_MIN_LENGTH);
 let creating = $state(false);
 let revoking = $state(false);
 let createdUrl = $state<string | null>(null);
@@ -94,9 +99,11 @@ $effect(() => {
     void getStorage()
         .then((s) => {
             maxShareTtlSec = s.max_share_ttl_sec ?? 0;
+            burnGraceSec = s.share_burn_grace_sec ?? 0;
         })
         .catch(() => {
             maxShareTtlSec = 0;
+            burnGraceSec = 0;
         });
     void getActiveShareForNote(noteId)
         .then((row) => {
@@ -266,6 +273,8 @@ async function copyText(text: string, label: string) {
                             placeholder="Share password"
                             bind:value={password}
                             autocomplete="new-password"
+                            minlength={SHARE_PASSWORD_MIN_LENGTH}
+                            aria-describedby="share-create-password-hint"
                         />
                         <Toggle.Root
                             bind:pressed={showSharePassword}
@@ -279,6 +288,10 @@ async function copyText(text: string, label: string) {
                             {/if}
                         </Toggle.Root>
                     </div>
+                    <p id="share-create-password-hint" class="text-xs text-[var(--text-muted)] mt-1.5">
+                        At least {SHARE_PASSWORD_MIN_LENGTH} characters. The password is sent separately from
+                        the link, so a short one can be guessed.
+                    </p>
                 {/if}
 
                 {#if attachmentFileIds.length > 0}
@@ -290,6 +303,15 @@ async function copyText(text: string, label: string) {
                         Include attachments
                         <span class="text-[var(--text-muted)]">({attachmentFileIds.length})</span>
                     </label>
+                    {#if includeAttachments}
+                        <p class="text-xs text-[var(--text-muted)] mt-1.5 ml-6" data-testid="share-attachments-note">
+                            Only the files attached right now are shared; files you add later are not.
+                            {#if linkType === "burn" && burnGraceSec > 0}
+                                After the link is opened, its attachments stay downloadable for
+                                {Math.round(burnGraceSec / 60)} more minutes.
+                            {/if}
+                        </p>
+                    {/if}
                 {/if}
 
                 <p class="flex gap-2 text-xs text-[var(--text-muted)] mt-4 leading-relaxed">
@@ -333,7 +355,7 @@ async function copyText(text: string, label: string) {
                         variant="primary"
                         onclick={handleCreate}
                         loading={creating}
-                        disabled={creating || (usePassword && !password.trim())}
+                        disabled={creating || (usePassword && !password.trim()) || passwordTooShort}
                     >
                         {replacing ? "Replace link" : "Create link"}
                     </Button>

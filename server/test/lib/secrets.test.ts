@@ -26,11 +26,11 @@ describe("isUnconfiguredSecret", () => {
 
 describe("assertProductionSecret", () => {
     test("refuses an unconfigured value with the long-standing message", () => {
-        expect(() => assertProductionSecret("COOKIE_SECRET", "", DEV_DEFAULT)).toThrow(
-            "COOKIE_SECRET must be securely configured in production.",
+        expect(() => assertProductionSecret("KDF_FAKE_SEED", "", DEV_DEFAULT)).toThrow(
+            "KDF_FAKE_SEED must be securely configured in production.",
         );
         expect(() =>
-            assertProductionSecret("COOKIE_SECRET", "REPLACE_WITH_LONG_RANDOM_STRING", DEV_DEFAULT),
+            assertProductionSecret("KDF_FAKE_SEED", "REPLACE_WITH_LONG_RANDOM_STRING", DEV_DEFAULT),
         ).toThrow("must be securely configured");
     });
 

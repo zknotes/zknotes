@@ -52,6 +52,7 @@ fi
 check_header "Cross-Origin-Opener-Policy: same-origin" "cross-origin-opener-policy.*same-origin"
 check_header "Strict-Transport-Security"                "strict-transport-security"
 check_header "X-Content-Type-Options: nosniff"         "x-content-type-options.*nosniff"
+check_header "Permissions-Policy (camera, microphone, geolocation off)" "permissions-policy:.*camera=()"
 check_header "frame-ancestors 'none' (in CSP)"          "frame-ancestors 'none'"
 
 # ── Every page: Referrer-Policy no-referrer ───────────────────────────────────

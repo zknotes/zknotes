@@ -287,7 +287,6 @@ setup_external_storage() {
 generate_secrets() {
     step "Secrets"
     env_ensure POSTGRES_PASSWORD "$(random_hex 32)"
-    env_ensure COOKIE_SECRET "$(random_hex 32)"
     env_ensure KDF_FAKE_SEED "$(random_hex 32)"
     say "  Every secret is set in docker/.env — keep a copy of that file with your backups."
 }

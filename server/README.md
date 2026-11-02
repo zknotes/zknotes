@@ -18,8 +18,8 @@ bunx drizzle-kit migrate                   # apply migrations to the dev DB
 
 DB connection via `DATABASE_URL`; copy `.env.example` → `.env`. The example file sets
 `NODE_ENV=production`, so pass `NODE_ENV=development` on the command line for local work (`../dev.sh`
-does). In production `COOKIE_SECRET` and `KDF_FAKE_SEED` must hold real values — startup throws while
-either is unset or still the `REPLACE_WITH_…` placeholder.
+does). In production `KDF_FAKE_SEED` must hold a real value — startup throws while it is unset or
+still the `REPLACE_WITH_…` placeholder.
 
 Migrations are **hand-written SQL**: edit `src/db/schema.ts`, write `drizzle/00NN_<name>.sql` by hand
 and add its entry to `drizzle/meta/_journal.json` (details in the

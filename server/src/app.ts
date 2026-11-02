@@ -22,9 +22,6 @@ import shareRoutes from "./routes/shares";
 import { registerAnalyticsHook } from "./services/analytics/hook";
 import { type ApiExtension, defaultExtensions } from "./server";
 
-const DEV_COOKIE_SECRET = "dev-cookie-secret-change-in-prod";
-const COOKIE_SECRET = process.env.COOKIE_SECRET || DEV_COOKIE_SECRET;
-
 // The bounds for the unauthenticated /client-error (anti log-spam / log-poisoning).
 const CLIENT_ERROR_RL_MAX = Number(process.env.CLIENT_ERROR_RATELIMIT_MAX ?? 30);
 const CLIENT_ERROR_RL_WINDOW = process.env.CLIENT_ERROR_RATELIMIT_WINDOW ?? "1 minute";
@@ -32,10 +29,8 @@ const CLIENT_ERROR_MAX_LEN = Number(process.env.CLIENT_ERROR_MAX_LEN ?? 1000);
 // An error message is tiny — an unauthenticated endpoint has no need for the global 30MB bodyLimit.
 const CLIENT_ERROR_BODY_LIMIT = Number(process.env.CLIENT_ERROR_BODY_LIMIT ?? 16 * 1024);
 
-if (!isDev) assertProductionSecret("COOKIE_SECRET", process.env.COOKIE_SECRET, DEV_COOKIE_SECRET);
-
 /**
- * A production guard for CORS_ORIGIN — the same hygiene as COOKIE_SECRET / KDF_FAKE_SEED.
+ * A production guard for CORS_ORIGIN — the same hygiene as KDF_FAKE_SEED.
  * Without an explicit origin the app would silently allow localhost with credentials:true.
  * Exported as a pure function for the unit test (the module-level import cache does not allow
  * NODE_ENV to be re-evaluated).
@@ -128,8 +123,10 @@ export async function buildApp(
 
     await fastify.register(rateLimit, { global: false });
 
+    // No cookie secret: the session cookie is a 256-bit random token hashed in the database, which
+    // needs no signature, and nothing here sets a signed cookie. The former COOKIE_SECRET was
+    // required in production and never used.
     await fastify.register(cookie, {
-        secret: COOKIE_SECRET,
         hook: "onRequest",
     });
 
@@ -140,7 +137,14 @@ export async function buildApp(
         // ("API returned a 4xx error response", the app.ts dev hook) is enough for dev visibility.
         const code = error.statusCode;
         if (code !== undefined && code < 500) {
-            fastify.log.warn({ err: error }, error.message);
+            // A refused credential, a rate limit or a miss is the normal traffic of a public API —
+            // at WARN every scan would fill the log (and rotate the lines that matter out of it).
+            // The counters that watch these live in the rate limiter and the lockouts, not in the log.
+            if (code === 401 || code === 403 || code === 404 || code === 429) {
+                fastify.log.info({ err: error }, error.message);
+            } else {
+                fastify.log.warn({ err: error }, error.message);
+            }
         } else {
             fastify.log.error(error);
         }

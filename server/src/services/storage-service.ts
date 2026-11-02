@@ -6,6 +6,20 @@ import { db } from "../db";
 import { chunkSets, uploadSessions } from "../db/schema";
 import { S3_BUCKET, s3 } from "../s3";
 
+/**
+ * The S3 key layout — the one definition. `storagePrefix` is the owner's `users.storage_prefix`
+ * (random, never the user id: the presigned URLs an anonymous share recipient gets carry the key),
+ * copied onto the upload session and chunk set so the objects can still be found once the user row
+ * is gone.
+ */
+export function chunkSetPrefix(storagePrefix: string, chunkSetId: string): string {
+    return `u/${storagePrefix}/${chunkSetId}/`;
+}
+
+export function chunkObjectKey(storagePrefix: string, chunkSetId: string, index: number): string {
+    return `${chunkSetPrefix(storagePrefix, chunkSetId)}${index}`;
+}
+
 export interface ListedUploadChunk {
     index: number;
     size: number;
@@ -61,13 +75,13 @@ export async function deleteObjectKeys(keys: string[]): Promise<void> {
     }
 }
 
-/** The objects under `u/<userId>/<chunkSetId>/` — one record per index, sorted. */
+/** The objects under the chunk set's prefix — one record per index, sorted. */
 export async function listUploadChunkObjects(
-    userId: string,
+    storagePrefix: string,
     chunkSetId: string,
 ): Promise<ListedUploadChunk[]> {
     const byIndex = new Map<number, number>();
-    for await (const obj of listObjects(`u/${userId}/${chunkSetId}/`)) {
+    for await (const obj of listObjects(chunkSetPrefix(storagePrefix, chunkSetId))) {
         const idx = Number(obj.key.split("/").pop());
         if (Number.isInteger(idx) && idx >= 0) byIndex.set(idx, obj.size);
     }
@@ -77,13 +91,15 @@ export async function listUploadChunkObjects(
 }
 
 /**
- * Deletes every S3 object under `u/<userId>/<chunkSetId>/`. Best effort: errors are swallowed
+ * Deletes every S3 object under the chunk set's prefix. Best effort: errors are swallowed
  * because the deep-repair sweep (gc.ts) picks up whatever is left behind.
  */
-export async function deleteS3Prefix(userId: string, chunkSetId: string): Promise<void> {
+export async function deleteS3Prefix(storagePrefix: string, chunkSetId: string): Promise<void> {
     try {
         const keys: string[] = [];
-        for await (const obj of listObjects(`u/${userId}/${chunkSetId}/`)) keys.push(obj.key);
+        for await (const obj of listObjects(chunkSetPrefix(storagePrefix, chunkSetId))) {
+            keys.push(obj.key);
+        }
         await deleteObjectKeys(keys);
     } catch {
         // best-effort; deep-repair catches the rest
@@ -91,24 +107,25 @@ export async function deleteS3Prefix(userId: string, chunkSetId: string): Promis
 }
 
 /**
- * Chunk-set ownership: a committed set OR a still-live upload session belonging to the same user.
- * (Previously copy-pasted between HEAD and GET /uploads/:id/chunks/:index.)
+ * Chunk-set ownership, answered with the key prefix the objects live under: a committed set OR a
+ * still-live upload session belonging to the same user, else null. (Previously copy-pasted between
+ * HEAD and GET /uploads/:id/chunks/:index.)
  */
-export async function userOwnsChunkSetOrUpload(
+export async function storagePrefixForChunkSet(
     chunkSetId: string,
     userId: string,
-): Promise<boolean> {
+): Promise<string | null> {
     const [ownedSet] = await db
-        .select({ id: chunkSets.id })
+        .select({ storage_prefix: chunkSets.storage_prefix })
         .from(chunkSets)
         .where(and(eq(chunkSets.id, chunkSetId), eq(chunkSets.user_id, userId)))
         .limit(1);
-    if (ownedSet) return true;
+    if (ownedSet) return ownedSet.storage_prefix;
 
     const [ownedUpload] = await db
-        .select({ id: uploadSessions.id })
+        .select({ storage_prefix: uploadSessions.storage_prefix })
         .from(uploadSessions)
         .where(and(eq(uploadSessions.id, chunkSetId), eq(uploadSessions.user_id, userId)))
         .limit(1);
-    return !!ownedUpload;
+    return ownedUpload?.storage_prefix ?? null;
 }

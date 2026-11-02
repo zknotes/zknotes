@@ -37,6 +37,7 @@ describe("runGc — sections A+B (sessions)", () => {
         expect(result).toEqual({
             authSessions: 0,
             signInFailures: 0,
+            shareFailures: 0,
             // Open-core has no extensions at all, so no GC step reports any counters.
             extensions: {},
             uploadSessions: 0,

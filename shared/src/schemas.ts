@@ -100,6 +100,11 @@ export const LoginSchema = z.object({
         .length(44),
 });
 
+/** The largest value a Postgres `integer` column takes; a bigger one used to end in a 500. */
+export const INT4_MAX = 2_147_483_647;
+/** A moment as epoch seconds: never negative, and within what a `bigint` column and `Date` hold. */
+const epochSecondsSchema = z.number().int().min(0).max(8_640_000_000_000);
+
 const EncryptedItemObject = z.object({
     id: z.string().uuid(),
     type: z.enum(["note", "folder", "file"]),
@@ -108,26 +113,32 @@ const EncryptedItemObject = z.object({
     payload_nonce: nonceB64Schema.nullable(), // base64 24B = 32 characters
     encrypted_item_key: z.string().regex(B64_CHARS).length(64).nullable(), // 48B (32B key + 16B tag) base64
     item_key_nonce: nonceB64Schema.nullable(),
-    version: z.number().int().min(1),
+    version: z.number().int().min(1).max(INT4_MAX),
     sort_order: z.string().min(1).max(256), // fractional index string
     // Synced trash timestamp. The client is authoritative, but the SERVER
     // clamps to "now" (a future date would dodge the retention sweep — "immortal trash"); past
     // timestamps are legitimate (offline trash). Only DELETE/batch changes trash state, not PUT.
-    deleted_at: z.number().int().optional().nullable(),
+    deleted_at: epochSecondsSchema.optional().nullable(),
     trashed_batch_id: z.string().uuid().optional().nullable(),
     // DELETED discriminator: purged_at != null → tombstone. The server sets it
     // on hard delete and returns it on pull; the client never sends it (it is ignored on upsert).
-    purged_at: z.number().int().optional().nullable(),
+    purged_at: epochSecondsSchema.optional().nullable(),
     // File-only plaintext refs (null for a note or folder). Visible to the server so it can validate
     // uploads and ref-count chunk sets for GC. Content and name stay encrypted in
     // the payload.
     chunk_set_id: z.string().uuid().optional().nullable(),
-    chunk_count: z.number().int().nonnegative().optional().nullable(),
-    ciphertext_size: z.number().int().nonnegative().optional().nullable(),
+    chunk_count: z.number().int().nonnegative().max(INT4_MAX).optional().nullable(),
+    ciphertext_size: z
+        .number()
+        .int()
+        .nonnegative()
+        .max(Number.MAX_SAFE_INTEGER)
+        .optional()
+        .nullable(),
     // Server-authoritative timestamps. Optional on the wire because the client never
     // sends them on upsert — the server sets them and sends them back.
-    created_at: z.number().int().optional().nullable(),
-    updated_at: z.number().int().optional().nullable(),
+    created_at: epochSecondsSchema.optional().nullable(),
+    updated_at: epochSecondsSchema.optional().nullable(),
 });
 
 /**
@@ -184,9 +195,46 @@ export const CreateItemSchema = EncryptedItemObject.omit({ version: true })
     .superRefine(cryptoFieldsConsistent)
     .superRefine(fileFieldsOnlyOnFiles);
 
-export const UpdateItemSchema = EncryptedItemObject.partial().required({
-    version: true,
-});
+/**
+ * The partial form of `cryptoFieldsConsistent` for an update: a field that is absent is simply not
+ * changed, but every crypto field that IS sent has to agree with the others sent — a payload set
+ * to null next to a key that is present would untie the payload from its key on the row.
+ */
+const cryptoFieldsConsistentWhenSent = (
+    v: {
+        encrypted_payload?: string | null;
+        payload_nonce?: string | null;
+        encrypted_item_key?: string | null;
+        item_key_nonce?: string | null;
+    },
+    ctx: zod.RefinementCtx,
+) => {
+    const sent = [
+        v.encrypted_payload,
+        v.payload_nonce,
+        v.encrypted_item_key,
+        v.item_key_nonce,
+    ].filter((f) => f !== undefined);
+    if (sent.length === 0) return;
+    const nullCount = sent.filter((f) => f === null).length;
+    if (nullCount !== 0 && nullCount !== sent.length) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "crypto_fields_must_be_all_null_or_all_present",
+        });
+    }
+};
+
+export const UpdateItemSchema = EncryptedItemObject.partial()
+    .required({
+        version: true,
+    })
+    .superRefine(cryptoFieldsConsistentWhenSent)
+    // The file-field rule needs the type; an update that leaves `type` out is checked against the
+    // stored row by the route (a note cannot bind a chunk set), not here.
+    .superRefine((v, ctx) => {
+        if (v.type !== undefined) fileFieldsOnlyOnFiles(v, ctx);
+    });
 
 /**
  * One entry in `delete_ids` (hard delete / purge). Two forms:
@@ -222,11 +270,11 @@ export const HistorySnapshotSchema = z.object({
     item_id: z.string().uuid(),
     encrypted_payload: z.string().max(MAX_ENCRYPTED_PAYLOAD_B64), // base64
     payload_nonce: nonceB64Schema, // base64 24B
-    encrypted_item_key: z.string(), // base64
+    encrypted_item_key: z.string().regex(B64_CHARS).length(64), // 48B (32B key + 16B tag) base64, as on an item
     item_key_nonce: nonceB64Schema, // base64 24B
-    item_version_at_snapshot: z.number().int().min(1),
+    item_version_at_snapshot: z.number().int().min(1).max(INT4_MAX),
     snapshot_number: z.number().int().min(1).optional(), // computed via ROW_NUMBER in the API
-    created_at: z.number().int(),
+    created_at: epochSecondsSchema,
 });
 
 export type HistorySnapshot = zod.infer<typeof HistorySnapshotSchema>;
@@ -249,6 +297,8 @@ export const MeStorageResponseDto = z.object({
     plan_label: z.string().nullable(),
     /** The concrete share TTL allowed — the client filters the options rather than deriving them from the plan. */
     max_share_ttl_sec: z.number().int().nonnegative(),
+    /** How long a one-time link keeps serving its attachments after the view that consumed it. */
+    share_burn_grace_sec: z.number().int().nonnegative(),
     breakdown: z.object({
         files_bytes: z.number().int(),
         items_bytes: z.number().int(),
@@ -352,11 +402,11 @@ export const PullCursorPayloadSchema = z
          */
         st: z.number().int().nonnegative(),
         /** Item keyset: the last `updated_at` (seconds). Required until `idone` is true. */
-        it: z.number().int().optional(),
+        it: z.number().int().min(0).max(8_640_000_000_000).optional(),
         iid: z.string().uuid().optional(),
         idone: z.boolean(),
         /** `sync_deleted_log` keyset: the last `deleted_at` (seconds). */
-        dt: z.number().int().optional(),
+        dt: z.number().int().min(0).max(8_640_000_000_000).optional(),
         did: z.string().uuid().optional(),
         ddone: z.boolean(),
     })

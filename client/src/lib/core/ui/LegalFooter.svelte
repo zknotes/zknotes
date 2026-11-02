@@ -10,10 +10,28 @@ let { class: className = "" }: { class?: string } = $props();
 
 let sourceUrl = $state<string | undefined>();
 
+// The footer is on the sign-in page, which is shown while the server may be unreachable; a failed
+// first load would otherwise leave the source link out for the rest of the visit. So: try again
+// when the browser comes back online, and when the tab is shown again, until the answer arrives.
 onMount(() => {
-    void loadInstancePublicConfig().then((cfg) => {
-        sourceUrl = cfg.sourceUrl;
-    });
+    const load = () => {
+        void loadInstancePublicConfig().then((cfg) => {
+            sourceUrl = cfg.sourceUrl;
+        });
+    };
+    const retry = () => {
+        if (!sourceUrl) load();
+    };
+    const onVisible = () => {
+        if (document.visibilityState === "visible") retry();
+    };
+    load();
+    window.addEventListener("online", retry);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+        window.removeEventListener("online", retry);
+        document.removeEventListener("visibilitychange", onVisible);
+    };
 });
 </script>
 

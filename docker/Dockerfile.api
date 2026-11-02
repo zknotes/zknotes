@@ -19,6 +19,13 @@ RUN bun install --frozen-lockfile --production
 # Copy the source.
 COPY server server
 
+# The license notices of every package that ships in this image, generated from the installed
+# packages (the same generator the web build uses), next to the product's own license.
+COPY LICENSE THIRD_PARTY_LICENSES.md ./
+COPY scripts/third-party-licenses scripts/third-party-licenses
+RUN bun scripts/third-party-licenses/cli.ts server > third-party-licenses.txt \
+    && rm -rf scripts
+
 # ── Runtime image ──────────────────────────────────────────────────────────────
 FROM oven/bun:1.4.2-alpine
 

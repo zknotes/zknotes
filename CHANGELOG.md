@@ -50,8 +50,69 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
   whole account, so the new name is accurate in both cases. Nothing else changed: same route,
   same password confirmation, same effect.
 
+### Added
+
+- Every build now carries the license notices of the open-source packages it is made of:
+  the web app serves them at `/third-party-licenses.txt`, linked from Settings → About, and the
+  Docker images hold the project's own license and the dependency inventory as files. The notices
+  are generated from the installed packages when the build runs, so they cannot go stale.
+
+### Changed
+
+- A share password now has to be at least 8 characters, and the dialog says why. When attachments
+  are included, the dialog says that only the files attached at that moment are shared and, for a
+  one-time link, how long they stay downloadable after the link is opened.
+- Guessing a share password now locks out only the network the guesses come from, not the link
+  itself: the recipient the link was sent to can still open it from elsewhere. A link is blocked
+  for everyone only after a far larger number of failures from many networks together. The
+  recipient page also explains that repeated wrong passwords block the link for a few minutes, and
+  a rate-limited request shows a sentence instead of an error code.
+- Opening the attachments of a password-protected share no longer re-checks the password on every
+  piece of a file; a password that passed on the view is trusted for a while, so downloads start
+  sooner and the server has that capacity for sign-ins.
+- The web server no longer announces its version in response headers and error pages.
+- `COOKIE_SECRET` is no longer required, or read: the session cookie is a random token hashed in
+  the database and was never signed with it. A self-host can drop the line from its `.env`; a
+  leftover line is ignored.
+- The Trash page now takes "N days left" from the server's own retention setting
+  (`TRASH_RETENTION_DAYS`, through `/instance-config`) instead of a number built into the client,
+  so an instance with a different retention shows the right count.
+- The restore wizard's two verdict routes (reading a session and verifying it) have their own,
+  lower per-user rate limit, since each recomputes the verdict over the whole manifest.
+- The web server now sends a `Permissions-Policy` header that turns off camera, microphone,
+  geolocation, payment and USB access for the app, which uses none of them, and the self-host
+  Caddy template no longer asserts HSTS `preload` on a domain it does not own.
+- A refused sign-in, a rate-limited request or a miss is logged at INFO rather than WARN, so a
+  scan no longer fills the log with warnings.
+- A note's inline colours, fonts, sizes and alignment are checked against the editor's own
+  grammar when a note is loaded, so a restored backup or an imported file cannot bring CSS of
+  someone else's choosing into the page; links keep the editor's own `rel` and `target`.
+- The production check of `S3_ENDPOINT` recognises every loopback address (any `127.x.x.x`,
+  `::1`, `*.localhost`), not only `localhost` and `127.0.0.1`.
+- The dev server listens on localhost only unless `VITE_DEV_HOST` says otherwise, and the test
+  script's cleanup after a hung browser kills only processes of this checkout.
+- A backup archive's `files/` entries are read only under their item id; any other name is skipped.
+- The footer's source link on the sign-in page is fetched again when the browser comes back online
+  or the tab is shown again, so a server that was unreachable at first load does not leave it out.
+- A note's history list is now paged by size as well as by count: a page stops once its
+  snapshots pass 8 MiB and the panel fetches the rest, instead of one answer carrying up to
+  fifty full notes.
+- The clean-build gate now also reads `bun.lock` and `bunfig.toml` scopes: a package resolved from
+  anywhere but the public npm registry, a git or tarball source, or a scoped registry fails it.
+
 ### Fixed
 
+- A conflicting update (`PUT /items/:id` with a stale version) now answers with the item in its
+  normal wire shape; it used to return the raw database row, with the owner's id and binary fields
+  as JSON buffers. A partial update that sends some of the encryption fields now has to keep them
+  consistent, as a full one always had to.
+- Integer fields that reach the database as 32-bit columns (version, chunk count, history
+  snapshot version) and every timestamp are bounded at validation, so a well-formed request with
+  an out-of-range number gets a 400 instead of a 500. A history snapshot's item key is validated
+  as the same base64 shape as an item's.
+- The download links an anonymous recipient of a shared file receives no longer contain the
+  owner's account id. New accounts get a random storage prefix instead; existing accounts keep
+  their stored files exactly where they are.
 - Images in a note now show up on phones and tablets. A device that is set not to download
   attachments by itself used to show every image in a note as "could not load file", with no way
   to fetch it from the note; only the file's Info panel could, and the note caught up after a

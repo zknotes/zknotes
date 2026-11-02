@@ -8,6 +8,7 @@
 // sign-in. That is why **nothing here is tied to a user** — the plan label is per-user and stays on
 // the authenticated `GET /me/storage`.
 import type { FastifyPluginAsync } from "fastify";
+import { TRASH_RETENTION_DAYS } from "../gc";
 
 /** Accepts only `https:` (and `http:` in dev, for `zknotes.localhost`). Anything invalid is omitted. */
 function safeUrl(raw: string | undefined): string | undefined {
@@ -44,6 +45,9 @@ const instanceConfigRoutes: FastifyPluginAsync = async (fastify) => {
             ...(sourceUrl ? { sourceUrl } : {}),
             ...(verifyUrl ? { verifyUrl } : {}),
             ...(manageUrl ? { account: { manageUrl } } : {}),
+            // How long Trash keeps an item before GC purges it (TRASH_RETENTION_DAYS) — the Trash
+            // page shows "N days left" from this instead of from a constant of its own.
+            trashRetentionDays: TRASH_RETENTION_DAYS,
         });
     });
 };

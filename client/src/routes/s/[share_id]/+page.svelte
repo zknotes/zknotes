@@ -5,6 +5,7 @@ import type { NotePayload } from "@zknotes/shared";
 import { viewProofB64FromFragmentKey } from "@zknotes/shared";
 import type { ShareAttachmentWire } from "$lib/core/api/shares";
 import { getShareMeta, viewShare } from "$lib/core/api/shares";
+import { ApiError } from "$lib/core/api/client";
 import Button from "$lib/core/ui/Button.svelte";
 import Callout from "$lib/core/ui/Callout.svelte";
 import LegalFooter from "$lib/core/ui/LegalFooter.svelte";
@@ -231,8 +232,12 @@ async function handleView() {
                         meta = { status: "unavailable" };
                         return;
                     }
-                    // The metadata is still "ready" → the password is wrong (anti-enumeration: the server does not distinguish).
-                    errorMsg = "Incorrect password. Try again.";
+                    // The metadata is still "ready" → the password is wrong, or this link is inside a
+                    // lockout after repeated wrong passwords (the server answers the same for both,
+                    // on purpose). One sentence covers both, so a locked-out recipient with the right
+                    // password knows to wait rather than retype it.
+                    errorMsg =
+                        "Incorrect password — or too many attempts; after several wrong passwords the link is blocked for a few minutes. Try again shortly.";
                     return;
                 } catch {
                     meta = { status: "unavailable" };
@@ -322,10 +327,21 @@ async function handleView() {
         }
         attachmentNames = names;
     } catch (e) {
-        errorMsg = e instanceof Error ? e.message : "Could not load note";
+        errorMsg = readableShareError(e, "Could not load note");
     } finally {
         viewing = false;
     }
+}
+
+/**
+ * The server's rate limit answers 429 with a bare code (`rate_limited`), which is what `ApiError`
+ * carries as its message. The recipient gets a sentence instead of the code.
+ */
+function readableShareError(e: unknown, fallback: string): string {
+    if (e instanceof ApiError && e.status === 429) {
+        return "Too many requests from your network right now. Wait a minute and try again.";
+    }
+    return e instanceof Error ? e.message : fallback;
 }
 
 function handleContentClick(e: MouseEvent) {
@@ -357,7 +373,7 @@ async function handleDownloadAttachment(att: ShareAttachmentWire) {
         });
         saveShareAttachmentFile(result.bytes, result.name, result.mime);
     } catch (e) {
-        errorMsg = e instanceof Error ? e.message : "Download failed";
+        errorMsg = readableShareError(e, "Download failed");
     } finally {
         downloadingId = null;
     }

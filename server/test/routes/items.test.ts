@@ -295,6 +295,10 @@ describe("PUT /items/:id", () => {
         const body = res.json();
         expect(body.error).toContain("version");
         expect(body.current_item).toBeTruthy();
+        // The wire shape, not the database row: no user_id, and the blobs as base64 strings.
+        expect(body.current_item.user_id).toBeUndefined();
+        expect(typeof body.current_item.encrypted_payload).toBe("string");
+        expect(body.current_item.version).toBe(1);
     });
 
     test("a non-existent id → 404", async () => {

@@ -152,7 +152,12 @@ async function handleAppShell(request: Request, url: URL): Promise<Response> {
         try {
             const res = await fetch(request);
             // Cache an OK navigation as the app shell (same-origin is guaranteed above; ssr=false → no plaintext).
-            if (res.ok) cache.put(APP_SHELL_KEY, res.clone());
+            // Only an HTML answer is the shell: a navigation to a plain file the server really has
+            // (/third-party-licenses.txt, /robots.txt) must not overwrite it, or the next offline
+            // start would boot from a text file.
+            if (res.ok && (res.headers.get("content-type") ?? "").includes("text/html")) {
+                cache.put(APP_SHELL_KEY, res.clone());
+            }
             return res;
         } catch {
             if (CAN_BOOT_FROM_CACHE) {

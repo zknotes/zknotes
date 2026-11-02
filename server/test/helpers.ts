@@ -177,6 +177,9 @@ export async function createSeededFileItem(
 export async function insertUser(id = "user-1") {
     await db.insert(users).values({
         id,
+        // The pre-prefix layout: rows the helpers insert keep the id as the key prefix, so a test
+        // that writes objects under `u/<userId>/…` for them stays valid.
+        storage_prefix: id,
         email: `${id}@test.com`,
         auth_key_hash: "hash",
         kdf_salt: Buffer.alloc(16),
@@ -189,11 +192,17 @@ export async function insertUser(id = "user-1") {
 export async function insertChunkSet(
     id: string,
     userId: string,
-    opts: { totalSize?: number; pendingDeleteAt?: number | null; createdAt?: number } = {},
+    opts: {
+        totalSize?: number;
+        pendingDeleteAt?: number | null;
+        createdAt?: number;
+        storagePrefix?: string;
+    } = {},
 ) {
     await db.insert(chunkSets).values({
         id,
         user_id: userId,
+        storage_prefix: opts.storagePrefix ?? userId,
         chunk_count: 1,
         total_size: opts.totalSize ?? 1000,
         pending_delete_at: opts.pendingDeleteAt ?? null,
@@ -212,6 +221,7 @@ export async function insertUploadSession(
     await db.insert(uploadSessions).values({
         id,
         user_id: userId,
+        storage_prefix: userId,
         expected_chunks: chunkSizes.length,
         total_size: totalSize || chunkSizes.reduce((a, b) => a + b, 0),
         chunk_sizes: chunkSizes,
@@ -384,6 +394,16 @@ export async function getChunkSet(id: string) {
 }
 
 /** Fetches the user ID for a given email. */
+/** The random S3 key segment of a user the API created (`users.storage_prefix`). */
+export async function getStoragePrefixByEmail(email: string): Promise<string | undefined> {
+    const [row] = await db
+        .select({ storage_prefix: users.storage_prefix })
+        .from(users)
+        .where(eq(users.email, email))
+        .limit(1);
+    return row?.storage_prefix;
+}
+
 export async function getUserIdByEmail(email: string): Promise<string | undefined> {
     const [row] = await db
         .select({ id: users.id })

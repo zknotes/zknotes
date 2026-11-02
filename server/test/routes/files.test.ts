@@ -22,6 +22,7 @@ import {
     filePayload,
     getChunkSet,
     getUploadSessionStatus,
+    getStoragePrefixByEmail,
     getUserIdByEmail,
     getUserStorageUsed,
     insertChunkSet,
@@ -517,13 +518,13 @@ describe("POST /uploads/:chunkSetId/finalize", () => {
         const openRes = await openUpload({ chunks: CHUNKS, totalSize, chunkSizes });
         expect(openRes.statusCode).toBe(201);
         const { chunk_set_id } = openRes.json() as OpenUploadBody;
-        const userId = await getUserIdByEmail(userEmail);
+        const storagePrefix = await getStoragePrefixByEmail(userEmail);
 
         for (let i = 0; i < CHUNKS; i++) {
             await s3.send(
                 new PutObjectCommand({
                     Bucket: S3_BUCKET,
-                    Key: `u/${userId}/${chunk_set_id}/${i}`,
+                    Key: `u/${storagePrefix}/${chunk_set_id}/${i}`,
                     Body: Buffer.alloc(chunkSize),
                 }),
             );
@@ -1008,11 +1009,11 @@ describe("the IP rate limit on the upload routes", () => {
                 },
             });
             const { chunk_set_id } = open.json() as OpenUploadBody;
-            const userId = await getUserIdByEmail(email);
+            const storagePrefix = await getStoragePrefixByEmail(email);
             await s3.send(
                 new PutObjectCommand({
                     Bucket: S3_BUCKET,
-                    Key: `u/${userId}/${chunk_set_id}/0`,
+                    Key: `u/${storagePrefix}/${chunk_set_id}/0`,
                     Body: CHUNK_BODY,
                 }),
             );
@@ -1033,5 +1034,27 @@ describe("the IP rate limit on the upload routes", () => {
         } finally {
             await freshApp.close();
         }
+    });
+});
+
+describe("storage prefix", () => {
+    test("a chunk download URL carries the account's random prefix, not its id", async () => {
+        const openRes = await openUpload({ chunks: 1, totalSize: 64, chunkSizes: [64] });
+        expect(openRes.statusCode).toBe(201);
+        const { chunk_set_id } = openRes.json() as OpenUploadBody;
+        const userId = await getUserIdByEmail(userEmail);
+        const storagePrefix = await getStoragePrefixByEmail(userEmail);
+        expect(storagePrefix).toMatch(/^[0-9a-f]{32}$/);
+        expect(storagePrefix).not.toBe(userId);
+
+        const res = await app.inject({
+            method: "GET",
+            url: `/uploads/${chunk_set_id}/chunks/0`,
+            headers: { cookie },
+        });
+        expect(res.statusCode).toBe(200);
+        const { url } = res.json() as { url: string };
+        expect(url).toContain(`/u/${storagePrefix}/${chunk_set_id}/0`);
+        expect(url).not.toContain(userId as string);
     });
 });

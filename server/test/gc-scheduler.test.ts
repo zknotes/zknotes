@@ -29,6 +29,7 @@ const repaired: DeepRepairResult = {
 const swept: GcResult = {
     authSessions: 0,
     signInFailures: 0,
+    shareFailures: 0,
     extensions: {},
     uploadSessions: 0,
     blobsPurged: 0,

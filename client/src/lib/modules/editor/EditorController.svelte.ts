@@ -49,6 +49,7 @@ import {
     topBlockTexts,
 } from "./sync-highlight";
 import type { TableUiController } from "./TableUiController.svelte";
+import { sanitizeEditorStyles } from "./style-sanitizer";
 
 // How long changed blocks stay highlighted — it has to follow the `.sync-flash-highlight` CSS animation.
 const SYNC_FLASH_MS = 2400;
@@ -152,7 +153,9 @@ export class EditorController {
         const prevSelection = highlightChanges ? editor.state.selection.from : null;
         this.isProgrammaticUpdate = true;
         try {
-            editor.commands.setContent(content);
+            // Inline styles and colour attributes reduced to what the editor itself writes — a
+            // restored backup or an import could otherwise carry CSS of someone else's choosing.
+            editor.commands.setContent(sanitizeEditorStyles(content));
             const freshState = EditorState.create({
                 doc: editor.state.doc,
                 plugins: editor.state.plugins,

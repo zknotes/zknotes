@@ -26,8 +26,11 @@ RUN bun install --frozen-lockfile
 COPY shared shared
 COPY client client
 
-# vite.config.ts imports changelogPlugin (it embeds CHANGELOG.md into the "what's new" panel).
+# vite.config.ts imports changelogPlugin (it embeds CHANGELOG.md into the "what's new" panel) and
+# thirdPartyLicensesPlugin (it writes /third-party-licenses.txt into the web root from the
+# installed packages, so the served bundle carries every dependency's license notice).
 COPY scripts/changelog scripts/changelog
+COPY scripts/third-party-licenses scripts/third-party-licenses
 COPY CHANGELOG.md CHANGELOG.md
 
 # VITE_API_URL is deliberately not set: the API is same-origin (Caddy routes by path prefix, see
@@ -64,6 +67,9 @@ FROM nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e591939
 # 50x.html, and a file that is served but not built is a file no one can verify.
 RUN rm -rf /usr/share/nginx/html/*
 COPY --from=builder /app/client/build /usr/share/nginx/html
+# The product's own license and the dependency inventory travel with the image, outside the web
+# root (the served copy of the notices is /third-party-licenses.txt, built above).
+COPY LICENSE THIRD_PARTY_LICENSES.md /usr/share/doc/zknotes/
 # The official nginx image: *.template in /etc/nginx/templates → envsubst at startup.
 # CSP_CONNECT_EXTRA (the S3 storage origin) comes from the compose environment.
 COPY --from=builder /app/nginx-default.conf.template /etc/nginx/templates/default.conf.template

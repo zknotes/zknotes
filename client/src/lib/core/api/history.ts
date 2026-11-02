@@ -11,11 +11,14 @@ export async function createSnapshot(body: CreateHistorySnapshot): Promise<Histo
     });
 }
 
-/** GET — a paginated list of snapshots (the newest first). */
+/**
+ * GET — a paginated list of snapshots (the newest first). A page may stop short of `limit` once
+ * its payload bytes pass the server's cap; `next_before` (ms) is then where to continue.
+ */
 export async function listSnapshots(
     itemId: string,
     opts: { limit?: number; before?: number } = {},
-): Promise<{ snapshots: HistorySnapshot[]; total: number }> {
+): Promise<{ snapshots: HistorySnapshot[]; total: number; next_before?: number | null }> {
     const params = new URLSearchParams();
     if (opts.limit !== undefined) params.set("limit", String(opts.limit));
     if (opts.before !== undefined) params.set("before", String(opts.before));

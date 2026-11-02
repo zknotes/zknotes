@@ -356,9 +356,10 @@ const itemRoutes: FastifyPluginAsync = async (fastify) => {
         }
 
         if (current.version !== data.version) {
+            // The wire shape, never the raw row: a row carries user_id and bytea as Buffer JSON.
             return reply
                 .status(409)
-                .send({ error: "Conflict: version mismatch", current_item: current });
+                .send({ error: "Conflict: version mismatch", current_item: itemToWire(current) });
         }
 
         // A cycle check when the parent changed
@@ -507,9 +508,10 @@ const itemRoutes: FastifyPluginAsync = async (fastify) => {
             return reply.send(itemToWire(updated));
         } catch (e: any) {
             if (e instanceof ItemVersionConflictError) {
-                return reply
-                    .status(409)
-                    .send({ error: "Conflict: version mismatch", current_item: e.currentItem });
+                return reply.status(409).send({
+                    error: "Conflict: version mismatch",
+                    current_item: itemToWire(e.currentItem),
+                });
             }
             if (e instanceof ItemRejected) return reply.status(e.status).send({ error: e.error });
             if (e instanceof QuotaExceededError) {

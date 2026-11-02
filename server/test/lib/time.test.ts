@@ -30,6 +30,12 @@ describe("parseTimestampParam", () => {
         expect(parseTimestampParam("0")).toBe(0);
         expect(parseTimestampParam("-5000")).toBe(-5);
     });
+
+    test("a value past what a Date can hold is no timestamp (it used to reach the database)", () => {
+        expect(parseTimestampParam("8640000000000000")).toBe(8_640_000_000_000);
+        expect(parseTimestampParam("8640000000000001")).toBeNull();
+        expect(parseTimestampParam("99999999999999999999")).toBeNull();
+    });
 });
 
 describe("issuedWatermarkMs", () => {

@@ -55,7 +55,6 @@ export function apiWebServer(
             NODE_ENV: "test",
             PORT: String(apiPort),
             DATABASE_URL: "postgresql://zknotes:zknotes@localhost:5433/zknotes_test",
-            FILE_STORAGE_PATH: "./storage-e2e",
             CORS_ORIGIN: corsOrigins.join(","),
             COOKIE_SECRET: "test-cookie-secret-must-be-32bytes!!",
             KDF_FAKE_SEED: "test-fake-kdf-seed-32-bytes-long!",

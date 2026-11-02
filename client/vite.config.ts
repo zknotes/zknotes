@@ -4,6 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
 import pkg from "../package.json";
 import { changelogPlugin } from "../scripts/changelog/vite-changelog-plugin";
+import { thirdPartyLicensesPlugin } from "../scripts/third-party-licenses/vite-licenses-plugin";
 
 // A reproducible build takes its timestamp from the commit, not from the clock: SOURCE_DATE_EPOCH
 // (seconds, UTC — the reproducible-builds.org convention) is set by the release build and by
@@ -42,6 +43,8 @@ export default defineConfig({
         tailwindcss(),
         sveltekit(),
         changelogPlugin({ limit: 20 }),
+        // /third-party-licenses.txt: the notices of every package that ships, linked from About.
+        thirdPartyLicensesPlugin(),
     ],
     build: {
         // Fonts always ship as files: an inlined `data:` font is blocked by the production CSP
@@ -75,7 +78,10 @@ export default defineConfig({
         include: ["fflate"],
     },
     server: {
-        host: true,
+        // Localhost only, unless asked: the dev server carries dev-only log routes and no auth of
+        // its own, so it is not something to expose to the whole network by default. For a phone
+        // on the same Wi-Fi: `VITE_DEV_HOST=0.0.0.0 bun run dev`.
+        host: process.env.VITE_DEV_HOST || "localhost",
         proxy: {
             // NOTE: only the real API prefixes the server exposes are listed here
             // (auth/items/uploads/me/shares/client-error; the history routes live under

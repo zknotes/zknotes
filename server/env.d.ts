@@ -9,7 +9,6 @@ declare namespace NodeJS {
         NODE_ENV?: "development" | "production" | "test";
         PORT?: string;
         CORS_ORIGIN?: string;
-        COOKIE_SECRET?: string;
         KDF_FAKE_SEED?: string;
         MIN_AUTH_RESPONSE_MS?: string;
         AUTH_JITTER_MS?: string;

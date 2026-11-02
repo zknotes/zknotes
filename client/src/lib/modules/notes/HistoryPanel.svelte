@@ -72,8 +72,17 @@ async function loadSnapshots() {
     loading = true;
     error = null;
     try {
-        const result = await listSnapshots(noteId, { limit: 50 });
-        snapshots = result.snapshots;
+        // A page can stop short of the limit when its snapshots are large (the server caps a page's
+        // bytes); follow `next_before` until the list is complete or the cap of 50 is reached.
+        const LIMIT = 50;
+        const all: HistorySnapshot[] = [];
+        let before: number | undefined;
+        do {
+            const result = await listSnapshots(noteId, { limit: LIMIT - all.length, before });
+            all.push(...result.snapshots);
+            before = result.next_before ?? undefined;
+        } while (before !== undefined && all.length < LIMIT);
+        snapshots = all;
     } catch (e) {
         error = "Could not load history.";
     } finally {

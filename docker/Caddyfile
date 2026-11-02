@@ -42,7 +42,10 @@
     }
 
     # HSTS (1 year, subdomains included).
-    header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+    # No `preload`: that directive is a promise to the browsers' preload list that this host and
+    # every subdomain serve HTTPS for good, made by submitting the domain — not something a template
+    # should assert for a domain it does not know. Add it yourself once you have submitted.
+    header Strict-Transport-Security "max-age=31536000; includeSubDomains"
     header X-Content-Type-Options "nosniff"
     header X-Frame-Options "DENY"
 

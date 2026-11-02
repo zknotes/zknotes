@@ -143,24 +143,29 @@ export function fileIcon(mime?: string): LucideIcon {
     return FileIcon;
 }
 
-/** How many days files stay in Trash before the auto-purge (kept in step with the API's TRASH_RETENTION_DAYS). */
+/**
+ * The fallback for how many days items stay in Trash before the auto-purge — used only until
+ * `/instance-config` has answered (`trashRetentionDays` is the instance's real TRASH_RETENTION_DAYS).
+ */
 export const TRASH_RETENTION_DAYS = 30;
 
 /**
  * Computes the retention time left in Trash, for display in the UI.
  * It returns null when deletedAtSec is not given.
  * The optional nowSec parameter allows caching: pass Math.floor(Date.now() / 1000) to avoid repeated
- * calls.
+ * calls. `retentionDays` is the instance's value from /instance-config; the constant above is the
+ * fallback before it is known.
  */
 export function trashRetentionLabel(
     deletedAtSec: number | undefined,
     nowSec?: number,
+    retentionDays: number = TRASH_RETENTION_DAYS,
 ): { deletedText: string; daysLeftText: string } | null {
     if (!deletedAtSec) return null;
     if (nowSec === undefined) nowSec = Math.floor(Date.now() / 1000);
     const elapsedSec = nowSec - deletedAtSec;
     const elapsedDays = Math.floor(elapsedSec / (24 * 3600));
-    const daysLeft = Math.max(1, TRASH_RETENTION_DAYS - elapsedDays);
+    const daysLeft = Math.max(1, retentionDays - elapsedDays);
 
     const deletedText = relativeTime(deletedAtSec);
     const daysLeftText = daysLeft === 1 ? "1 day left" : `${daysLeft} days left`;

@@ -5,15 +5,16 @@ import { assertKdfParamsFloor, CreateShareSchema, ViewShareSchema } from "@zknot
 import { and, desc, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
 import { db } from "../db";
-import { items, shareAttachments, shareLinks, users } from "../db/schema";
+import { chunkSets, items, shareAttachments, shareLinks, users } from "../db/schema";
 import { AUTH_BODY_LIMIT } from "../lib/auth-floor";
-import { authenticatedRouteOptions, ipRateLimit } from "../lib/rate-limit";
+import { authenticatedRouteOptions, ipRateLimit, rateLimitKey } from "../lib/rate-limit";
 import { nowSec } from "../lib/time";
 import { parseBody } from "../lib/validate";
 import { bufToB64, requireB64ToBuf } from "../lib/wire";
 import { requireUserId } from "../plugins/auth";
 import { S3_BUCKET, s3 } from "../s3";
 import { hashAuthKey } from "../services/auth-service";
+import { chunkObjectKey } from "../services/storage-service";
 import {
     floorShareResponse,
     hashViewProof,
@@ -439,6 +440,7 @@ const shareRoutes: FastifyPluginAsync = async (fastify) => {
                     mode: "view",
                     shareAuthKey: body.share_auth_key,
                     viewProof: body.view_proof,
+                    source: rateLimitKey(request),
                     started,
                 });
                 if (!gate.ok) return reply.send(UNAVAILABLE);
@@ -570,25 +572,30 @@ const shareRoutes: FastifyPluginAsync = async (fastify) => {
                 mode: "chunk",
                 shareAuthKey,
                 viewProof,
+                source: rateLimitKey(request),
                 started,
             });
             if (!gate.ok) return reply.send(UNAVAILABLE);
 
+            // The key comes from the chunk set's own prefix — random, so the URL handed to an
+            // anonymous recipient names no user.
             const [att] = await db
                 .select({
-                    owner_id: shareLinks.user_id,
                     chunk_set_id: items.chunk_set_id,
                     chunk_count: items.chunk_count,
                     deleted_at: items.deleted_at,
+                    storage_prefix: chunkSets.storage_prefix,
                 })
                 .from(shareAttachments)
                 .innerJoin(shareLinks, eq(shareAttachments.share_id, shareLinks.id))
                 .innerJoin(items, eq(shareAttachments.file_id, items.id))
+                .leftJoin(chunkSets, eq(items.chunk_set_id, chunkSets.id))
                 .where(and(eq(shareAttachments.share_id, id), eq(shareAttachments.file_id, fileId)))
                 .limit(1);
 
             if (
                 !att?.chunk_set_id ||
+                att.storage_prefix == null ||
                 att.deleted_at != null ||
                 att.chunk_count == null ||
                 chunkIndex >= att.chunk_count
@@ -599,7 +606,7 @@ const shareRoutes: FastifyPluginAsync = async (fastify) => {
             // A short presign: after a revoke, already-issued URLs may live at most this long.
             const command = new GetObjectCommand({
                 Bucket: S3_BUCKET,
-                Key: `u/${att.owner_id}/${att.chunk_set_id}/${chunkIndex}`,
+                Key: chunkObjectKey(att.storage_prefix, att.chunk_set_id, chunkIndex),
                 ResponseCacheControl: "private, max-age=300",
             });
             const url = await getSignedUrl(s3, command, { expiresIn: 300 });

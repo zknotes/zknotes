@@ -36,6 +36,9 @@ export function parseTimestampParam(value: string | undefined): number | null {
     if (!value) return null;
     const ms = parseInt(value, 10);
     if (Number.isNaN(ms)) return null;
+    // Beyond what `Date` represents (±8.64e15 ms) is no timestamp — the caller gets the same
+    // answer as for garbage (a 400 or "no bound"), not a 500 from the database's bigint.
+    if (Math.abs(ms) > 8_640_000_000_000_000) return null;
     return Math.floor(ms / 1000);
 }
 

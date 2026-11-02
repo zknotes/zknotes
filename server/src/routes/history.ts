@@ -1,4 +1,4 @@
-import { CreateHistorySnapshotSchema } from "@zknotes/shared";
+import { CreateHistorySnapshotSchema, SYNC_LIMITS } from "@zknotes/shared";
 import { and, eq } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
 import { uuidv7 } from "uuidv7";
@@ -37,9 +37,31 @@ const historyRoutes: FastifyPluginAsync = async (fastify) => {
         const beforeSec = parseTimestampParam(query.before);
 
         const rows = await listNumberedSnapshots(itemId, userId, { limit, beforeSec });
-        const snapshots = rows.map(snapshotToWire);
 
-        return reply.send({ snapshots, total: snapshots.length });
+        // The row count is bounded (50) but each row carries a whole encrypted note, so a page
+        // used to be up to 50 × 10 MiB. The page stops once its payload bytes pass the cap (the
+        // same figure as a sync batch), and `next_before` tells the client where to continue; the
+        // first row always goes, so a single large snapshot still comes through.
+        const maxBytes = Number(process.env.HISTORY_PAGE_MAX_BYTES ?? SYNC_LIMITS.MAX_BATCH_BYTES);
+        const snapshots: ReturnType<typeof snapshotToWire>[] = [];
+        let bytes = 0;
+        let truncated = false;
+        for (const row of rows) {
+            const size = row.encrypted_payload?.byteLength ?? 0;
+            if (snapshots.length > 0 && bytes + size > maxBytes) {
+                truncated = true;
+                break;
+            }
+            bytes += size;
+            snapshots.push(snapshotToWire(row));
+        }
+        const last = snapshots[snapshots.length - 1];
+        return reply.send({
+            snapshots,
+            total: snapshots.length,
+            // Milliseconds, the same unit `before` takes.
+            next_before: truncated && last ? last.created_at * 1000 : null,
+        });
     });
 
     // POST /items/:id/history — creates a new snapshot

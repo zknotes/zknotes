@@ -28,7 +28,7 @@ import {
 } from "../db/schema";
 import { ADVISORY_LOCKS } from "../db/advisory-locks";
 import type { DbExecutor } from "../db/types";
-import { authenticatedRouteOptions } from "../lib/rate-limit";
+import { authenticatedRouteOptions, userRateLimitPreHandler } from "../lib/rate-limit";
 import { nowSec } from "../lib/time";
 import { parseBody } from "../lib/validate";
 import { wireBlobsToRow } from "../lib/wire";
@@ -635,6 +635,17 @@ function stagedParentOk(
 
 const restoreRoutes: FastifyPluginAsync = async (fastify) => {
     const { read: authRead, mut: authMut } = authenticatedRouteOptions(fastify);
+    // The verdict is recomputed over the whole manifest (up to 100 000 entries) on every
+    // GET /restore/sessions/:id and verify; under the general read limit one account could keep
+    // the database and CPU busy with it. The wizard needs a handful of these per restore, so
+    // these two routes get their own, much lower, per-user limit.
+    const verdictRl = userRateLimitPreHandler(
+        fastify,
+        Number(process.env.RESTORE_VERDICT_RATE_LIMIT_MAX ?? 20),
+        process.env.RESTORE_VERDICT_RATE_LIMIT_WINDOW ?? "1 minute",
+    );
+    const authReadVerdict = { ...authRead, preHandler: [...authRead.preHandler, verdictRl] };
+    const authMutVerdict = { ...authMut, preHandler: [...authMut.preHandler, verdictRl] };
 
     fastify.post("/restore/sessions", authMut, async (request, reply) => {
         const userId = requireUserId(request);
@@ -690,7 +701,7 @@ const restoreRoutes: FastifyPluginAsync = async (fastify) => {
         }
     });
 
-    fastify.get("/restore/sessions/:id", authRead, async (request, reply) => {
+    fastify.get("/restore/sessions/:id", authReadVerdict, async (request, reply) => {
         const userId = requireUserId(request);
         const { id } = request.params as { id: string };
         if (!isUuid(id)) return reply.status(400).send({ error: "bad_restore_session_id" });
@@ -973,7 +984,7 @@ const restoreRoutes: FastifyPluginAsync = async (fastify) => {
         };
     }
 
-    fastify.post("/restore/sessions/:id/verify", authMut, async (request, reply) => {
+    fastify.post("/restore/sessions/:id/verify", authMutVerdict, async (request, reply) => {
         const userId = requireUserId(request);
         const { id } = request.params as { id: string };
         if (!isUuid(id)) return reply.status(400).send({ error: "bad_restore_session_id" });
@@ -1218,7 +1229,7 @@ const restoreRoutes: FastifyPluginAsync = async (fastify) => {
                     throw new RestoreConflict(409, { error: "already_committed" });
                 }
                 if (session.status === "aborted")
-                    return [] as Array<{ userId: string; id: string }>;
+                    return [] as Array<{ storagePrefix: string; id: string }>;
                 const { prefixes: p } = await releaseRestoreStaging(tx, session);
                 await tx
                     .update(restoreSessions)
@@ -1234,7 +1245,7 @@ const restoreRoutes: FastifyPluginAsync = async (fastify) => {
             return reply.status(prefixes.status).send(prefixes.body);
         }
         for (const p of prefixes) {
-            await deleteS3Prefix(p.userId, p.id);
+            await deleteS3Prefix(p.storagePrefix, p.id);
         }
         return reply.send({ ok: true });
     });

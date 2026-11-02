@@ -40,7 +40,13 @@ import {
 import CollectionList from "$lib/core/ui/CollectionList.svelte";
 import CollectionListRow from "$lib/core/ui/CollectionListRow.svelte";
 import CollectionListSkeleton from "$lib/core/ui/CollectionListSkeleton.svelte";
-import { formatDateOnly, humanSizeShort, trashRetentionLabel } from "$lib/core/utils/format";
+import {
+    formatDateOnly,
+    humanSizeShort,
+    TRASH_RETENTION_DAYS,
+    trashRetentionLabel,
+} from "$lib/core/utils/format";
+import { loadInstancePublicConfig } from "$lib/core/constants/public-www";
 import { effectiveTrashedBytes, localTrashedFileBytes } from "$lib/core/utils/storage-display";
 import FileThumb from "$lib/modules/files/FileThumb.svelte";
 import { FileService } from "$lib/modules/files/file-service";
@@ -72,6 +78,14 @@ let deleting = $state(false);
 
 let storage = $state<StorageInfo | "loading" | "error">("loading");
 let trashSize = $state(0);
+// "N days left" uses the instance's own retention (/instance-config); the constant is only the
+// fallback until that answer arrives.
+let trashRetentionDays = $state(TRASH_RETENTION_DAYS);
+onMount(() => {
+    void loadInstancePublicConfig().then((cfg) => {
+        if (cfg.trashRetentionDays) trashRetentionDays = cfg.trashRetentionDays;
+    });
+});
 
 async function refreshTrashSize() {
     trashSize = await localTrashedFileBytes();
@@ -453,7 +467,7 @@ async function confirmDestructiveAction() {
                             {/if}
                         {/snippet}
                         {#snippet subtitle()}
-                            {@const retention = trashRetentionLabel(item.deleted_at, cachedNowSec)}
+                            {@const retention = trashRetentionLabel(item.deleted_at, cachedNowSec, trashRetentionDays)}
                             <div class="flex items-center gap-2 text-2xs font-mono text-[var(--text-dim)] mt-0.5 flex-wrap">
                                 {#if item.type === "file"}
                                     <span>{humanSizeShort(item.size ?? 0)}</span>

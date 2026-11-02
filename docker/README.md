@@ -67,7 +67,6 @@ Edit `.env` and set at least:
 | Key | Value |
 |---|---|
 | `POSTGRES_PASSWORD` | `openssl rand -hex 32`. Compose passes it to the `db` service and builds the API's `DATABASE_URL` from it. |
-| `COOKIE_SECRET` | `openssl rand -hex 32` |
 | `KDF_FAKE_SEED` | `openssl rand -hex 32` — generate it **once** and never change it. |
 | `APP_DOMAIN` | Your vault domain, e.g. `notes.example.com`. Caddy serves it and obtains its certificate. |
 | `CORS_ORIGIN` | `https://notes.example.com` (the same domain, with the scheme). |
@@ -79,8 +78,9 @@ Edit `.env` and set at least:
 Leave `DATABASE_URL` and `NODE_ENV` as they are: `docker-compose.yml` sets both for the API container
 (`DATABASE_URL=postgresql://zknotes:${POSTGRES_PASSWORD}@db:5432/zknotes`, `NODE_ENV=production`),
 and those values override whatever `.env` holds. The API refuses to start in production while
-`COOKIE_SECRET` or `KDF_FAKE_SEED` still holds the `REPLACE_WITH_…` placeholder, or while the `S3_*`
-values are still the development ones.
+`KDF_FAKE_SEED` still holds the `REPLACE_WITH_…` placeholder, or while the `S3_*` values are still
+the development ones. (`COOKIE_SECRET` from older setups is no longer read; a leftover line is
+ignored.)
 
 Both `Caddyfile` and `docker-compose.yml` take the domain from `APP_DOMAIN`, so deploying under a
 different domain means editing one line in `.env` and nothing else.
@@ -369,7 +369,6 @@ The API JSON routes (`GET/POST /shares/:id`) are separate; rate limits are confi
 ## 6. Security checklist before going live
 
 - [ ] `KDF_FAKE_SEED` generated with `openssl rand -hex 32` and kept somewhere safe — it must never change
-- [ ] `COOKIE_SECRET` generated with `openssl rand -hex 32`
 - [ ] Caddy sees real client addresses (`setup.sh` checks rootless Docker, and the API warns in its
       log when every visitor arrives from one private address): after visiting the site from your own connection, the
       `remote_ip` in `docker compose logs caddy` is your public IPv4 or IPv6 address, not a
@@ -386,7 +385,10 @@ The API JSON routes (`GET/POST /shares/:id`) are separate; rate limits are confi
 - [ ] Per-IP rate limits see real client addresses: the API trusts `X-Forwarded-For` only from
       `TRUST_PROXY` (compose default: the `edge` subnet, which only Caddy shares with the API). If
       you put another proxy in front, list its address there; anything that reaches `api:3000`
-      directly from a trusted address can choose the client address the API records
+      directly from a trusted address can choose the client address the API records. The default
+      subnet also contains Docker's own gateway address, so a process on the host itself that could
+      reach `api:3000` would count as trusted; the compose file publishes no API port, so nothing
+      on the host reaches it except through Caddy
 - [ ] `POSTGRES_PASSWORD` generated with `openssl rand -hex 32`
 - [ ] `CORS_ORIGIN` set to exact frontend URL (no wildcard)
 - [ ] `S3_*` variables set for your object storage: `S3_ENDPOINT` a public `https://` address, the
@@ -410,7 +412,7 @@ Verify the values the stack actually uses, not just what is in `server/.env.exam
 `docker compose config` prints the resolved environment for a quick sanity check:
 
 ```bash
-docker compose config | grep -E "KDF_FAKE_SEED|COOKIE_SECRET|POSTGRES_PASSWORD|APP_DOMAIN|SOURCE_URL|S3_ENDPOINT"
+docker compose config | grep -E "KDF_FAKE_SEED|POSTGRES_PASSWORD|APP_DOMAIN|SOURCE_URL|S3_ENDPOINT"
 ```
 
 ---

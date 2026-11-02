@@ -10,7 +10,7 @@
  * This is a STATIC check of the graph and it runs in every `./check.sh`. Alongside it, CI builds the
  * client in a clean container — which catches what a manifest does not admit to.
  */
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 
 const ROOT = resolve(import.meta.dir, "..");
@@ -139,6 +139,48 @@ for (const file of rcFiles) {
             });
         }
     }
+}
+
+// ── 2b. Registry scopes in bunfig.toml ───────────────────────────────────────
+// `[install.scopes]` routes a scope to another registry, with its own `url =` and `token =`; the
+// `registry =` check above does not see it.
+for (const file of rcFiles.filter((f) => f.endsWith("bunfig.toml"))) {
+    const rel = relative(ROOT, file);
+    let inScopes = false;
+    for (const [i, line] of readFileSync(file, "utf8").split("\n").entries()) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith("#")) continue;
+        if (/^\[/.test(trimmed)) inScopes = /^\[install\.scopes/.test(trimmed);
+        if (!inScopes) continue;
+        findings.push({ file: `${rel}:${i + 1}`, reason: `install scope: ${trimmed}` });
+    }
+}
+
+// ── 3. The lockfile ──────────────────────────────────────────────────────────
+// What the manifests say is one thing; what gets installed is what the lockfile resolved. A
+// package pulled from a private registry, a tarball URL or a git host would be recorded here as an
+// address, so every URL in the lock has to point at the public npm registry.
+const lockFile = join(ROOT, "bun.lock");
+if (existsSync(lockFile)) {
+    const lock = readFileSync(lockFile, "utf8");
+    for (const [i, line] of lock.split("\n").entries()) {
+        for (const m of line.matchAll(/[a-z][a-z0-9+.-]*:\/\/([^/"'\s]+)/gi)) {
+            const host = (m[1] ?? "").toLowerCase();
+            if (host === "registry.npmjs.org") continue;
+            findings.push({ file: `bun.lock:${i + 1}`, reason: `resolved outside npm: ${m[0]}` });
+        }
+        if (
+            /"(github|git\+[a-z]+|gitlab|bitbucket):/i.test(line) ||
+            /\bworkspace:[^"]*\.\./.test(line)
+        ) {
+            findings.push({
+                file: `bun.lock:${i + 1}`,
+                reason: `non-registry source: ${line.trim()}`,
+            });
+        }
+    }
+} else {
+    findings.push({ file: "bun.lock", reason: "lockfile missing — the install is not pinned" });
 }
 
 // ── Output ───────────────────────────────────────────────────────────────────

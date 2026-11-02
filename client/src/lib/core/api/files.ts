@@ -298,6 +298,8 @@ export interface StorageInfo {
     plan_label: string | null;
     /** The concrete share TTL allowed; the client filters the options by it. */
     max_share_ttl_sec: number;
+    /** How long a one-time link keeps serving its attachments after the view that consumed it. */
+    share_burn_grace_sec: number;
 }
 
 /** GET /me/storage — always fresh: the bar is shown right after the change that moved it. */

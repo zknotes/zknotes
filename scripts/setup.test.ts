@@ -176,14 +176,11 @@ describe("a whole run (--no-start)", () => {
         expect(env.COMPOSE_PROFILES).toBe("storage");
         expect(env.STORAGE_DOMAIN).toBe("s3.notes.example.com");
         expect(env.S3_ENDPOINT).toBe("https://s3.notes.example.com");
-        for (const key of [
-            "POSTGRES_PASSWORD",
-            "COOKIE_SECRET",
-            "KDF_FAKE_SEED",
-            "GARAGE_RPC_SECRET",
-        ]) {
+        for (const key of ["POSTGRES_PASSWORD", "KDF_FAKE_SEED", "GARAGE_RPC_SECRET"]) {
             expect(env[key], key).toMatch(/^[0-9a-f]{64}$/);
         }
+        // No longer read by the API, so setup no longer generates it.
+        expect(env.COOKIE_SECRET).toBeUndefined();
         expect(env.S3_ACCESS_KEY).toMatch(/^GK[0-9a-f]{24}$/);
         expect(env.S3_SECRET_KEY).toMatch(/^[0-9a-f]{64}$/);
         expect(readFileSync(join(dir, "sites/storage.caddy"), "utf8")).toContain(
@@ -201,7 +198,6 @@ describe("a whole run (--no-start)", () => {
         expect(second.S3_ENDPOINT).toBe("https://s3.vault.example.org");
         for (const key of [
             "POSTGRES_PASSWORD",
-            "COOKIE_SECRET",
             "KDF_FAKE_SEED",
             "GARAGE_RPC_SECRET",
             "S3_ACCESS_KEY",

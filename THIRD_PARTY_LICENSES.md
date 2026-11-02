@@ -3,6 +3,12 @@
 ZKnotes is licensed under the **GNU Affero General Public License v3.0 only** (see [`LICENSE`](LICENSE)).
 This file records the licenses of the code it depends on, and why each is compatible with that choice.
 
+The notices themselves — every package that ships, with the license text it carries — are not
+kept here but generated at build time by `scripts/third-party-licenses/` from the installed
+packages: the web build serves them as `/third-party-licenses.txt` (linked from Settings → About),
+and the API image writes the same kind of file next to its code. Both Docker images also carry
+`LICENSE` and this file.
+
 The table below lists the **direct dependencies whose code ships**: every package the three
 manifests (`server/`, `client/`, `shared/`) declare under `dependencies`, plus three the client
 declares as development dependencies because they are only needed to build it, although what they

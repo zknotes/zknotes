@@ -22,8 +22,8 @@ export type RestoreSessionRow = typeof restoreSessions.$inferSelect;
 export async function releaseRestoreStaging(
     executor: DbExecutor,
     session: RestoreSessionRow,
-): Promise<{ prefixes: Array<{ userId: string; id: string }> }> {
-    const prefixes: Array<{ userId: string; id: string }> = [];
+): Promise<{ prefixes: Array<{ storagePrefix: string; id: string }> }> {
+    const prefixes: Array<{ storagePrefix: string; id: string }> = [];
     const staged = await executor
         .select()
         .from(restoreStagedItems)
@@ -45,7 +45,7 @@ export async function releaseRestoreStaging(
         if (u.status === "restore_staging") fileBytes += Number(u.total_size);
         await executor.delete(fileChunks).where(eq(fileChunks.chunk_set_id, u.id));
         await executor.delete(uploadSessions).where(eq(uploadSessions.id, u.id));
-        prefixes.push({ userId: u.user_id, id: u.id });
+        prefixes.push({ storagePrefix: u.storage_prefix, id: u.id });
     }
 
     const sets = await executor
@@ -76,7 +76,7 @@ export async function releaseRestoreStaging(
         }
         const marked = await markPendingDelete(cs.id, cs.user_id, executor);
         if (marked) fileBytes += Number(cs.total_size);
-        prefixes.push({ userId: cs.user_id, id: cs.id });
+        prefixes.push({ storagePrefix: cs.storage_prefix, id: cs.id });
     }
 
     if (itemBytes !== 0 || fileBytes !== 0) {

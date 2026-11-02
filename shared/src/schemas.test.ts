@@ -4,9 +4,11 @@ import {
     ChangePasswordSchema,
     CreateItemSchema,
     decodePullCursor,
-    EncryptedItemSchema,
     encodePullCursor,
+    EncryptedItemSchema,
     FILE_LIMITS,
+    HistorySnapshotSchema,
+    INT4_MAX,
     LoginSchema,
     OpenUploadSchema,
     PullCursorPayloadSchema,
@@ -17,6 +19,7 @@ import {
     RestoreSessionItemsSchema,
     RestoreVerifySchema,
     SYNC_LIMITS,
+    UpdateItemSchema,
     VaultCreateSchema,
     VerifyEmailSchema,
 } from "./schemas";
@@ -588,5 +591,112 @@ describe("pull cursor codec", () => {
             }).success,
         ).toBe(false);
         expect(PullItemsQuerySchema.safeParse({ limit: "0" }).success).toBe(false);
+    });
+});
+
+describe("UpdateItemSchema", () => {
+    const base = { version: 2 };
+
+    it("accepts a partial update that leaves the crypto fields alone", () => {
+        expect(UpdateItemSchema.safeParse({ ...base, parent_id: null }).success).toBe(true);
+    });
+
+    it("accepts the four crypto fields sent together, all present or all null", () => {
+        const full = {
+            ...base,
+            encrypted_payload: "abc",
+            payload_nonce: "A".repeat(32),
+            encrypted_item_key: "C".repeat(64),
+            item_key_nonce: "B".repeat(32),
+        };
+        expect(UpdateItemSchema.safeParse(full).success).toBe(true);
+        expect(
+            UpdateItemSchema.safeParse({
+                ...base,
+                encrypted_payload: null,
+                payload_nonce: null,
+                encrypted_item_key: null,
+                item_key_nonce: null,
+            }).success,
+        ).toBe(true);
+    });
+
+    it("rejects a payload set to null next to a key that is sent", () => {
+        const r = UpdateItemSchema.safeParse({
+            ...base,
+            encrypted_payload: null,
+            encrypted_item_key: "C".repeat(64),
+        });
+        expect(r.success).toBe(false);
+    });
+
+    it("rejects file fields on a note, but leaves an update without a type to the route", () => {
+        expect(UpdateItemSchema.safeParse({ ...base, type: "note", chunk_count: 1 }).success).toBe(
+            false,
+        );
+        expect(UpdateItemSchema.safeParse({ ...base, chunk_count: 1 }).success).toBe(true);
+    });
+});
+
+describe("integer bounds — a well-formed request must not end in a database error", () => {
+    const valid = {
+        id: validUuid,
+        type: "file" as const,
+        parent_id: null,
+        encrypted_payload: "abc123",
+        payload_nonce: "A".repeat(32),
+        encrypted_item_key: "C".repeat(64),
+        item_key_nonce: "B".repeat(32),
+        version: 1,
+        sort_order: "abc",
+        chunk_set_id: validUuid,
+        chunk_count: 1,
+        ciphertext_size: 10,
+    };
+
+    it("caps the int4 columns at 2^31-1 and refuses negative moments", () => {
+        expect(EncryptedItemSchema.safeParse({ ...valid, chunk_count: INT4_MAX }).success).toBe(
+            true,
+        );
+        expect(EncryptedItemSchema.safeParse({ ...valid, chunk_count: INT4_MAX + 1 }).success).toBe(
+            false,
+        );
+        expect(EncryptedItemSchema.safeParse({ ...valid, version: INT4_MAX + 1 }).success).toBe(
+            false,
+        );
+        expect(EncryptedItemSchema.safeParse({ ...valid, deleted_at: -1 }).success).toBe(false);
+        expect(EncryptedItemSchema.safeParse({ ...valid, deleted_at: 1_800_000_000 }).success).toBe(
+            true,
+        );
+    });
+
+    it("bounds the keyset cursor's timestamps", () => {
+        const cursor = { v: 1 as const, st: 1, idone: true, ddone: true };
+        expect(PullCursorPayloadSchema.safeParse({ ...cursor, dt: 1_800_000_000 }).success).toBe(
+            true,
+        );
+        expect(PullCursorPayloadSchema.safeParse({ ...cursor, dt: -5 }).success).toBe(false);
+        expect(PullCursorPayloadSchema.safeParse({ ...cursor, dt: 1e18 }).success).toBe(false);
+    });
+
+    it("a history snapshot's item key has the same shape as an item's", () => {
+        const snap = {
+            id: validUuid,
+            item_id: validUuid,
+            encrypted_payload: "abc",
+            payload_nonce: "A".repeat(32),
+            encrypted_item_key: "C".repeat(64),
+            item_key_nonce: "B".repeat(32),
+            item_version_at_snapshot: 1,
+            created_at: 1_800_000_000,
+        };
+        expect(HistorySnapshotSchema.safeParse(snap).success).toBe(true);
+        expect(
+            HistorySnapshotSchema.safeParse({ ...snap, encrypted_item_key: "not base64!" }).success,
+        ).toBe(false);
+        expect(
+            HistorySnapshotSchema.safeParse({ ...snap, item_version_at_snapshot: INT4_MAX + 1 })
+                .success,
+        ).toBe(false);
     });
 });

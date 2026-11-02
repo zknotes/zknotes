@@ -18,7 +18,7 @@ import { nowSec } from "../lib/time";
  *     file).
  *
  * Aborted and committed sessions are left alone (idempotent: a retry does not free the quota
- * twice). The in-flight S3 prefix (`u/{userId}/{uploadSessionId}/`) is caught by the GC deep-repair
+ * twice). The in-flight S3 prefix (`u/{storagePrefix}/{uploadSessionId}/`) is caught by the GC deep-repair
  * (a prefix with no DB record).
  */
 export async function abortAllUserUploads(tx: DbTransaction, userId: string): Promise<void> {

@@ -28,6 +28,12 @@ afterEach(() => {
 
 const config = async () => (await app.inject({ method: "GET", url: "/instance-config" })).json();
 
+describe("instance-config trash retention", () => {
+    test("tells the client how long Trash keeps an item (TRASH_RETENTION_DAYS, default 30)", async () => {
+        expect((await config()).trashRetentionDays).toBe(30);
+    });
+});
+
 describe("instance-config public links", () => {
     test("a trailing slash is dropped, a malformed value or a non-web scheme is omitted", async () => {
         process.env.PUBLIC_WWW_URL = "https://zknotes.eu/";

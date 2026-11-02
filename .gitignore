@@ -30,8 +30,6 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # Playwright
 playwright-report
 test-results
-server/zknotes-e2e.db
-server/storage-e2e
 
 # IntelliJ based IDEs
 .idea

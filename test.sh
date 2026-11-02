@@ -189,9 +189,18 @@ run_vitest_step() {
 # ports (3000/5173/5174), so this leaves them alone.
 E2E_PORTS=(3001 5188 4188)
 
+# Only after a hung teardown (see run_e2e_project). It kills only what this checkout started: the
+# vitest/Playwright workers whose command line names this repository, the browsers whose working
+# directory is under it, and whatever holds the E2E ports — never another project's test run on the
+# same machine.
 e2e_cleanup() {
-    pkill -9 -f "workerProcessEntry" 2>/dev/null || true
-    pkill -9 -f "playwright_chromiumdev_profile" 2>/dev/null || true
+    pkill -9 -f "${ROOT}/.*workerProcessEntry" 2>/dev/null || true
+    local bpid
+    for bpid in $(pgrep -f "playwright_chromiumdev_profile" 2>/dev/null || true); do
+        local cwd
+        cwd="$(readlink "/proc/${bpid}/cwd" 2>/dev/null || lsof -a -p "${bpid}" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)"
+        [[ "${cwd}" == "${ROOT}"* ]] && kill -9 "${bpid}" 2>/dev/null || true
+    done
     local p
     for p in "${E2E_PORTS[@]}"; do
         local pids

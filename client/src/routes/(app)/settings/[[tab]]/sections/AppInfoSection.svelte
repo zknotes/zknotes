@@ -45,7 +45,9 @@ onMount(() => {
                 <p class="text-xs text-[var(--text-muted)]">
                     Free software under the
                     <a href="https://www.gnu.org/licenses/agpl-3.0.html" target="_blank" rel="noopener noreferrer" class="underline hover:text-[var(--text)]">GNU AGPL-3.0</a>,
-                    provided without any warranty.
+                    provided without any warranty. It is built with open-source packages whose
+                    <a href="/third-party-licenses.txt" target="_blank" rel="noopener noreferrer" class="underline hover:text-[var(--text)]" id="about-licenses-btn">licenses and notices</a>
+                    ship with every build.
                 </p>
                 <p class="text-xs text-[var(--text-muted)] mt-1">Build date: {new Date(__BUILD_DATE__).toLocaleString()}</p>
                 <!-- The full commit, readable and copyable: it is what a user compares with

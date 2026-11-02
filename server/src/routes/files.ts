@@ -16,26 +16,36 @@ import { authenticatedRouteOptions, ipRateLimit } from "../lib/rate-limit";
 import { nowSec } from "../lib/time";
 import { parseBody } from "../lib/validate";
 import { requireUserId } from "../plugins/auth";
+import { SHARE_BURN_DOWNLOAD_GRACE_SEC } from "../services/share-gate";
 import { S3_BUCKET, s3 } from "../s3";
 import { countUserItems, QuotaExceededError, updateQuotaTx } from "../services/quota-service";
 import {
+    chunkObjectKey,
     deleteS3Prefix,
     listUploadChunkObjects,
-    userOwnsChunkSetOrUpload,
+    storagePrefixForChunkSet,
 } from "../services/storage-service";
 
-async function abortTxn(chunkSetId: string, userId: string): Promise<{ code: 200 | 404 | 409 }> {
+async function abortTxn(
+    chunkSetId: string,
+    userId: string,
+): Promise<{ code: 200 | 404 | 409; storagePrefix?: string }> {
     return db.transaction(async (tx) => {
         const [session] = await tx
-            .select({ status: uploadSessions.status, total_size: uploadSessions.total_size })
+            .select({
+                status: uploadSessions.status,
+                total_size: uploadSessions.total_size,
+                storage_prefix: uploadSessions.storage_prefix,
+            })
             .from(uploadSessions)
             .where(and(eq(uploadSessions.id, chunkSetId), eq(uploadSessions.user_id, userId)))
             .for("update")
             .limit(1);
         if (!session) return { code: 404 };
         if (session.status === "committed") return { code: 409 };
+        const storagePrefix = session.storage_prefix;
         // Idempotent: a repeated DELETE must not release the reserved quota a second time.
-        if (session.status === "aborted") return { code: 200 };
+        if (session.status === "aborted") return { code: 200, storagePrefix };
 
         await updateQuotaTx(tx, userId, { files: -session.total_size }, false);
 
@@ -45,7 +55,7 @@ async function abortTxn(chunkSetId: string, userId: string): Promise<{ code: 200
             .set({ status: "aborted", updated_at: nowSec() })
             .where(eq(uploadSessions.id, chunkSetId));
 
-        return { code: 200 };
+        return { code: 200, storagePrefix };
     });
 }
 
@@ -171,6 +181,15 @@ const fileRoutes: FastifyPluginAsync = async (fastify) => {
             }
         }
 
+        // The owner's key prefix is fixed on the session now: every object of this upload goes
+        // under it, and the chunk set inherits it at finalize.
+        const [owner] = await db
+            .select({ storage_prefix: users.storage_prefix })
+            .from(users)
+            .where(eq(users.id, userId))
+            .limit(1);
+        if (!owner) return reply.status(401).send({ error: "Unauthorized" });
+
         const chunkSetId = uuidv7();
         const uploadStatus = restore_session_id ? "restore_staging" : "uploading";
         const quotaOpts = restore_session_id
@@ -185,6 +204,7 @@ const fileRoutes: FastifyPluginAsync = async (fastify) => {
                 await tx.insert(uploadSessions).values({
                     id: chunkSetId,
                     user_id: userId,
+                    storage_prefix: owner.storage_prefix,
                     expected_chunks,
                     total_size,
                     chunk_sizes,
@@ -229,6 +249,7 @@ const fileRoutes: FastifyPluginAsync = async (fastify) => {
                 status: uploadSessions.status,
                 expected_chunks: uploadSessions.expected_chunks,
                 chunk_sizes: uploadSessions.chunk_sizes,
+                storage_prefix: uploadSessions.storage_prefix,
             })
             .from(uploadSessions)
             .where(and(eq(uploadSessions.id, chunkSetId), eq(uploadSessions.user_id, userId)))
@@ -254,7 +275,7 @@ const fileRoutes: FastifyPluginAsync = async (fastify) => {
         for (const idx of uniqueIndices) {
             const command = new PutObjectCommand({
                 Bucket: S3_BUCKET,
-                Key: `u/${userId}/${chunkSetId}/${idx}`,
+                Key: chunkObjectKey(session.storage_prefix, chunkSetId, idx),
                 ContentLength: storedSizes[idx],
             });
             const put_url = await getSignedUrl(s3, command, {
@@ -324,6 +345,7 @@ const fileRoutes: FastifyPluginAsync = async (fastify) => {
                 status: uploadSessions.status,
                 expected_chunks: uploadSessions.expected_chunks,
                 total_size: uploadSessions.total_size,
+                storage_prefix: uploadSessions.storage_prefix,
             })
             .from(uploadSessions)
             .where(and(eq(uploadSessions.id, chunkSetId), eq(uploadSessions.user_id, userId)))
@@ -331,7 +353,7 @@ const fileRoutes: FastifyPluginAsync = async (fastify) => {
 
         if (!session) return reply.status(404).send({ error: "no_session" });
 
-        const listed = await listUploadChunkObjects(userId, chunkSetId);
+        const listed = await listUploadChunkObjects(session.storage_prefix, chunkSetId);
         const present_indices = listed.map((c) => c.index);
         const total_present_size = listed.reduce((acc, c) => acc + c.size, 0);
 
@@ -350,7 +372,15 @@ const fileRoutes: FastifyPluginAsync = async (fastify) => {
         const { chunkSetId } = request.params as { chunkSetId: string };
         if (!isUuid(chunkSetId)) return reply.status(400).send({ error: "bad_chunk_set_id" });
 
-        const listed = await listUploadChunkObjects(userId, chunkSetId);
+        // The prefix first: the listing happens outside the transaction below, which re-reads the
+        // session for the commit itself.
+        const [owned] = await db
+            .select({ storage_prefix: uploadSessions.storage_prefix })
+            .from(uploadSessions)
+            .where(and(eq(uploadSessions.id, chunkSetId), eq(uploadSessions.user_id, userId)))
+            .limit(1);
+        if (!owned) return reply.status(404).send({ error: "no_session" });
+        const listed = await listUploadChunkObjects(owned.storage_prefix, chunkSetId);
         const parsedChunks = listed.map((c) => ({ idx: c.index, size: c.size }));
 
         // IMPORTANT: the reply is NOT sent inside the transaction — the response may leave only
@@ -366,6 +396,7 @@ const fileRoutes: FastifyPluginAsync = async (fastify) => {
                         expected_chunks: uploadSessions.expected_chunks,
                         total_size: uploadSessions.total_size,
                         restore_session_id: uploadSessions.restore_session_id,
+                        storage_prefix: uploadSessions.storage_prefix,
                     })
                     .from(uploadSessions)
                     .where(
@@ -412,6 +443,7 @@ const fileRoutes: FastifyPluginAsync = async (fastify) => {
                 await tx.insert(chunkSets).values({
                     id: chunkSetId,
                     user_id: userId,
+                    storage_prefix: session.storage_prefix,
                     chunk_count: session.expected_chunks,
                     total_size: session.total_size,
                     restore_session_id: session.restore_session_id,
@@ -460,7 +492,7 @@ const fileRoutes: FastifyPluginAsync = async (fastify) => {
         }
 
         // Clean the objects out of S3 (best effort — deep-repair picks up the rest)
-        await deleteS3Prefix(userId, chunkSetId);
+        if (res.storagePrefix) await deleteS3Prefix(res.storagePrefix, chunkSetId);
 
         return reply.send({ ok: true });
     });
@@ -472,7 +504,8 @@ const fileRoutes: FastifyPluginAsync = async (fastify) => {
         if (!params.ok) return reply.status(400).send({ error: params.error });
         const { chunkSetId, chunkIndex } = params;
 
-        if (!(await userOwnsChunkSetOrUpload(chunkSetId, userId))) {
+        const storagePrefix = await storagePrefixForChunkSet(chunkSetId, userId);
+        if (!storagePrefix) {
             request.log.warn({ chunkSetId, userId }, "HEAD chunk: Ownership validation failed");
             return reply.status(404).send({ error: "not_found" });
         }
@@ -481,7 +514,7 @@ const fileRoutes: FastifyPluginAsync = async (fastify) => {
             await s3.send(
                 new HeadObjectCommand({
                     Bucket: S3_BUCKET,
-                    Key: `u/${userId}/${chunkSetId}/${chunkIndex}`,
+                    Key: chunkObjectKey(storagePrefix, chunkSetId, chunkIndex),
                 }),
             );
             return reply.status(200).send();
@@ -507,14 +540,15 @@ const fileRoutes: FastifyPluginAsync = async (fastify) => {
         if (!params.ok) return reply.status(400).send({ error: params.error });
         const { chunkSetId, chunkIndex } = params;
 
-        // Ownership check
-        if (!(await userOwnsChunkSetOrUpload(chunkSetId, userId))) {
+        // Ownership check — answered with the prefix the objects live under.
+        const storagePrefix = await storagePrefixForChunkSet(chunkSetId, userId);
+        if (!storagePrefix) {
             return reply.status(404).send({ error: "not_found" });
         }
 
         const command = new GetObjectCommand({
             Bucket: S3_BUCKET,
-            Key: `u/${userId}/${chunkSetId}/${chunkIndex}`,
+            Key: chunkObjectKey(storagePrefix, chunkSetId, chunkIndex),
             // A chunk's ciphertext is immutable (Replace/Crop creates a new chunkSetId), so the S3
             // response may go into the browser's HTTP cache — otherwise every Range restart by the
             // video player would pull the same chunk off the network again.
@@ -570,6 +604,9 @@ const fileRoutes: FastifyPluginAsync = async (fastify) => {
             // The concrete TTL allowed, not "which plan" — the client only filters the offered
             // options by it and no longer has a plan-dependent branch.
             max_share_ttl_sec: limits.maxShareTtlSec,
+            // How long a one-time link keeps serving its attachments after the view that consumed
+            // it — the share dialog tells the owner, so the number is not written into the client.
+            share_burn_grace_sec: SHARE_BURN_DOWNLOAD_GRACE_SEC,
             breakdown: {
                 files_bytes: user.storage_used_files,
                 items_bytes: user.storage_used_items,

@@ -14,8 +14,6 @@ server/scripts
 client/e2e
 **/*.test.ts
 **/*.log
-server/storage*
-server/zknotes-e2e.db
 **/*.md
 !README.md
 !THIRD_PARTY_LICENSES.md

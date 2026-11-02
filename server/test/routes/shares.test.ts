@@ -1,14 +1,15 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { verify } from "@node-rs/argon2";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { uuidv7 } from "uuidv7";
 import { buildApp } from "../../src/app";
 import { db } from "../../src/db";
-import { items, shareLinks, users } from "../../src/db/schema";
+import { items, shareFailures, shareLinks, users } from "../../src/db/schema";
 import { runGc } from "../../src/gc";
 import { hashAuthKey } from "../../src/services/auth-service";
 import {
+    __clearVerifiedShareKeysForTest,
     isShareChunkAccessible,
     SHARE_BURN_DOWNLOAD_GRACE_SEC,
 } from "../../src/services/share-gate";
@@ -35,6 +36,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
     await resetDb();
+    __clearVerifiedShareKeysForTest();
     ({ cookie } = await createTestUser(app));
 });
 
@@ -93,14 +95,6 @@ async function postShare(payload: Record<string, unknown>, c = cookie) {
         headers: { cookie: c },
         payload,
     });
-}
-
-/**
- * Open-core has no plans: the permissive provider (seam 2) returns `isPaid: true` for everyone, so
- * "give them a paid plan" is a no-op. The function stays so the tests need not change.
- */
-async function grantPaidPlan(_email = "test@example.com") {
-    // deliberately empty — see the comment above
 }
 
 async function createNoteFile(noteId: string, c = cookie): Promise<string> {
@@ -414,7 +408,7 @@ describe("POST /shares/:id/view", () => {
         expect(await verify(hash, authKey)).toBe(true);
     });
 
-    test("repeated wrong share passwords lock the share", async () => {
+    test("repeated wrong share passwords lock the share for that source only", async () => {
         const noteId = await createNote();
         const shareId = uuidv7();
         const authKey = "C".repeat(44);
@@ -426,45 +420,145 @@ describe("POST /shares/:id/view", () => {
             }),
         );
 
-        // The default SHARE_PASSWORD_MAX_ATTEMPTS = 5 — five wrong attempts, then a lock.
+        // The default SHARE_PASSWORD_MAX_ATTEMPTS = 5 — five wrong attempts from one source, then
+        // a lock for that source.
         for (let i = 0; i < 5; i++) {
             const res = await app.inject({
                 method: "POST",
                 url: `/shares/${shareId}/view`,
+                remoteAddress: "198.51.100.7",
                 payload: viewPayload({ share_auth_key: "Z".repeat(44) }),
             });
             expect(res.json() as { status: string }).toEqual({ status: "unavailable" });
         }
 
-        const [locked] = await db.select().from(shareLinks).where(eq(shareLinks.id, shareId));
-        expect(locked?.failed_attempts).toBeGreaterThanOrEqual(5);
-        expect(locked?.locked_until).not.toBeNull();
-        expect((locked?.locked_until ?? 0) > Math.floor(Date.now() / 1000)).toBe(true);
+        const now = Math.floor(Date.now() / 1000);
+        const [run] = await db
+            .select()
+            .from(shareFailures)
+            .where(
+                and(eq(shareFailures.share_id, shareId), eq(shareFailures.source, "198.51.100.7")),
+            );
+        expect(run?.failed_attempts).toBe(5);
+        expect((run?.locked_until ?? 0) > now).toBe(true);
+        // The share-wide backstop counted the failures but is far from its own threshold.
+        const [share] = await db.select().from(shareLinks).where(eq(shareLinks.id, shareId));
+        expect(share?.failed_attempts).toBe(5);
+        expect(share?.locked_until).toBeNull();
 
-        // The correct key is still unavailable while the lock holds.
+        // The correct key is still unavailable from the locked source while the lock holds…
         const whileLocked = await app.inject({
             method: "POST",
             url: `/shares/${shareId}/view`,
+            remoteAddress: "198.51.100.7",
             payload: viewPayload({ share_auth_key: authKey }),
         });
         expect(whileLocked.json() as { status: string }).toEqual({ status: "unavailable" });
 
-        // Unlock into the past — the correct key passes.
+        // …but the recipient the link was sent to, on another network, is not locked out.
+        const elsewhere = await app.inject({
+            method: "POST",
+            url: `/shares/${shareId}/view`,
+            remoteAddress: "203.0.113.9",
+            payload: viewPayload({ share_auth_key: authKey }),
+        });
+        expect(elsewhere.statusCode).toBe(200);
+        expect(elsewhere.json().encrypted_payload).toBeTruthy();
+        // Their success resets the share-wide count, but not the guesser's own lock.
+        const [afterOther] = await db.select().from(shareLinks).where(eq(shareLinks.id, shareId));
+        expect(afterOther?.failed_attempts).toBe(0);
+        const [stillLocked] = await db
+            .select()
+            .from(shareFailures)
+            .where(
+                and(eq(shareFailures.share_id, shareId), eq(shareFailures.source, "198.51.100.7")),
+            );
+        expect((stillLocked?.locked_until ?? 0) > now).toBe(true);
+
+        // Unlock the source into the past — its correct key passes and its run is forgotten.
         await db
-            .update(shareLinks)
-            .set({ locked_until: Math.floor(Date.now() / 1000) - 10 })
-            .where(eq(shareLinks.id, shareId));
+            .update(shareFailures)
+            .set({ locked_until: now - 10 })
+            .where(eq(shareFailures.share_id, shareId));
         const after = await app.inject({
             method: "POST",
             url: `/shares/${shareId}/view`,
+            remoteAddress: "198.51.100.7",
             payload: viewPayload({ share_auth_key: authKey }),
         });
         expect(after.statusCode).toBe(200);
-        expect(after.json().encrypted_payload).toBeTruthy();
+        const runs = await db
+            .select()
+            .from(shareFailures)
+            .where(eq(shareFailures.share_id, shareId));
+        expect(runs).toHaveLength(0);
         const [reset] = await db.select().from(shareLinks).where(eq(shareLinks.id, shareId));
         expect(reset?.failed_attempts).toBe(0);
         expect(reset?.locked_until).toBeNull();
         expect(reset?.failed_window_started_at).toBeNull();
+    });
+
+    test("the share-wide backstop locks the link once many sources fail together", async () => {
+        const noteId = await createNote();
+        const shareId = uuidv7();
+        const authKey = "C".repeat(44);
+        await postShare(
+            shareCreatePayload(shareId, noteId, {
+                share_auth_key: authKey,
+                share_kdf_salt: "D".repeat(24),
+                share_kdf_params: { m: 1024, t: 1, p: 1 },
+            }),
+        );
+        const now = Math.floor(Date.now() / 1000);
+        // One failure away from the backstop threshold (100), from a source that is not locked.
+        await db
+            .update(shareLinks)
+            .set({ failed_attempts: 99, failed_window_started_at: now })
+            .where(eq(shareLinks.id, shareId));
+
+        const res = await app.inject({
+            method: "POST",
+            url: `/shares/${shareId}/view`,
+            remoteAddress: "192.0.2.44",
+            payload: viewPayload({ share_auth_key: "Z".repeat(44) }),
+        });
+        expect(res.json() as { status: string }).toEqual({ status: "unavailable" });
+
+        const [share] = await db.select().from(shareLinks).where(eq(shareLinks.id, shareId));
+        expect(share?.failed_attempts).toBe(100);
+        expect((share?.locked_until ?? 0) > now).toBe(true);
+        // Now every source is out, the right password included.
+        const anyone = await app.inject({
+            method: "POST",
+            url: `/shares/${shareId}/view`,
+            remoteAddress: "203.0.113.9",
+            payload: viewPayload({ share_auth_key: authKey }),
+        });
+        expect(anyone.json() as { status: string }).toEqual({ status: "unavailable" });
+    });
+
+    test("a wrong password from a source with no proof of the link key counts nowhere", async () => {
+        const noteId = await createNote();
+        const shareId = uuidv7();
+        await postShare(
+            shareCreatePayload(shareId, noteId, {
+                share_auth_key: "C".repeat(44),
+                share_kdf_salt: "D".repeat(24),
+                share_kdf_params: { m: 1024, t: 1, p: 1 },
+            }),
+        );
+        const res = await app.inject({
+            method: "POST",
+            url: `/shares/${shareId}/view`,
+            remoteAddress: "192.0.2.44",
+            payload: { view_proof: "B".repeat(44), share_auth_key: "Z".repeat(44) },
+        });
+        expect(res.json() as { status: string }).toEqual({ status: "unavailable" });
+        const runs = await db
+            .select()
+            .from(shareFailures)
+            .where(eq(shareFailures.share_id, shareId));
+        expect(runs).toHaveLength(0);
     });
 
     test("wrong share passwords inside the window increment the counter", async () => {
@@ -759,7 +853,6 @@ describe("share attachments", () => {
     });
 
     test("paid user: create with attachment → view returns attachments", async () => {
-        await grantPaidPlan();
         const noteId = await createNote();
         const fileId = await createNoteFile(noteId);
         const shareId = uuidv7();
@@ -792,7 +885,6 @@ describe("share attachments", () => {
     });
 
     test("invalid attachment (wrong parent) → 400", async () => {
-        await grantPaidPlan();
         const noteId = await createNote();
         const otherNote = await createNote();
         const fileId = await createNoteFile(otherNote);
@@ -812,7 +904,6 @@ describe("share attachments", () => {
     });
 
     test("chunk endpoint: invalid index → 400; after view returns presigned url", async () => {
-        await grantPaidPlan();
         const noteId = await createNote();
         const fileId = await createNoteFile(noteId);
         const shareId = uuidv7();
@@ -868,9 +959,99 @@ describe("share attachments", () => {
     });
 });
 
+describe("share attachments — storage prefix and the verified-key cache", () => {
+    const RANDOM_PREFIX = "4f1c0d9a2b7e4c3d8e5f6a7b8c9d0e1f";
+
+    async function fileWithPrefix(noteId: string): Promise<string> {
+        const userId = (await getUserIdByEmail("test@example.com"))!;
+        const chunkSetId = uuidv7();
+        const fileId = uuidv7();
+        await insertChunkSet(chunkSetId, userId, { totalSize: 100, storagePrefix: RANDOM_PREFIX });
+        const res = await app.inject({
+            method: "POST",
+            url: "/items",
+            headers: { cookie },
+            payload: filePayload(fileId, chunkSetId, { parent_id: noteId }),
+        });
+        expect(res.statusCode).toBe(201);
+        return fileId;
+    }
+
+    const attachment = (fileId: string) => ({
+        file_id: fileId,
+        wrapped_item_key: "F".repeat(64),
+        item_key_nonce: "F".repeat(32),
+    });
+
+    test("the presigned chunk URL names the random storage prefix, never the owner's id", async () => {
+        const noteId = await createNote();
+        const fileId = await fileWithPrefix(noteId);
+        const userId = (await getUserIdByEmail("test@example.com"))!;
+        const shareId = uuidv7();
+        const create = await postShare(
+            shareCreatePayload(shareId, noteId, { attachments: [attachment(fileId)] }),
+        );
+        expect(create.statusCode).toBe(201);
+
+        const res = await app.inject({
+            method: "POST",
+            url: `/shares/${shareId}/chunks/${fileId}/0`,
+            payload: chunkBody(),
+        });
+        expect(res.statusCode).toBe(200);
+        const { url } = res.json() as { url: string };
+        expect(url).toContain(`/u/${RANDOM_PREFIX}/`);
+        expect(url).not.toContain(userId);
+    });
+
+    test("a password verified on the view is trusted by the chunk route until the cache is cleared", async () => {
+        const noteId = await createNote();
+        const fileId = await fileWithPrefix(noteId);
+        const shareId = uuidv7();
+        const authKey = "C".repeat(44);
+        const create = await postShare(
+            shareCreatePayload(shareId, noteId, {
+                share_auth_key: authKey,
+                share_kdf_salt: "D".repeat(24),
+                share_kdf_params: { m: 1024, t: 1, p: 1 },
+                attachments: [attachment(fileId)],
+            }),
+        );
+        expect(create.statusCode).toBe(201);
+
+        const view = await app.inject({
+            method: "POST",
+            url: `/shares/${shareId}/view`,
+            payload: viewPayload({ share_auth_key: authKey }),
+        });
+        expect(view.statusCode).toBe(200);
+
+        // Swap the stored verifier for another key's: from now on only the cache can say yes.
+        await db
+            .update(shareLinks)
+            .set({ share_auth_key_hash: await hashAuthKey("X".repeat(44)) })
+            .where(eq(shareLinks.id, shareId));
+
+        const cached = await app.inject({
+            method: "POST",
+            url: `/shares/${shareId}/chunks/${fileId}/0`,
+            payload: chunkBody({ share_auth_key: authKey }),
+        });
+        expect(cached.statusCode).toBe(200);
+        expect((cached.json() as { url?: string }).url).toBeTruthy();
+
+        __clearVerifiedShareKeysForTest();
+        const verified = await app.inject({
+            method: "POST",
+            url: `/shares/${shareId}/chunks/${fileId}/0`,
+            payload: chunkBody({ share_auth_key: authKey }),
+        });
+        expect(verified.json() as { status: string }).toEqual({ status: "unavailable" });
+    });
+});
+
 describe("burn download grace (chunk gate)", () => {
     async function createBurnShareWithFile(): Promise<{ shareId: string; fileId: string }> {
-        await grantPaidPlan();
         const noteId = await createNote();
         const fileId = await createNoteFile(noteId);
         const shareId = uuidv7();

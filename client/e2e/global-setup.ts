@@ -1,5 +1,4 @@
 import { spawnSync } from "node:child_process";
-import { rm } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { warmVite } from "./helpers/warm-vite";
@@ -12,9 +11,6 @@ const apiDir = resolve(__dirname, "../../server");
 const E2E_DB_URL = "postgresql://zknotes:zknotes@localhost:5433/zknotes_test";
 
 export default async function globalSetup(): Promise<void> {
-    // Clear the previous test artefacts so every run starts from scratch
-    await rm(resolve(apiDir, "storage-e2e"), { recursive: true, force: true });
-
     // Apply schema to the e2e test database via drizzle-kit, spawned from server —
     // drizzle-orm is not hoisted into the root node_modules, so a direct import from here does not work.
     const res = spawnSync("bunx", ["drizzle-kit", "migrate"], {

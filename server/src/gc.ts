@@ -33,7 +33,13 @@ import { releaseRestoreStaging } from "./services/restore-service";
 import { S3_BUCKET, s3 } from "./s3";
 import { purgeOwnedItem } from "./services/item-service";
 import { purgeStaleSignInFailures } from "./services/login-throttle";
-import { deleteS3Prefix, listObjects, prefixHasObjects } from "./services/storage-service";
+import { purgeStaleShareFailures } from "./services/share-gate";
+import {
+    chunkSetPrefix,
+    deleteS3Prefix,
+    listObjects,
+    prefixHasObjects,
+} from "./services/storage-service";
 
 // BLOB_PURGE_GRACE: how many seconds we wait between the pending_delete mark and the physical
 // deletion. Default 1h — it gives a window for a crop undo.
@@ -47,8 +53,10 @@ const DEFAULT_TOMBSTONE_PURGE_SECONDS = Number(process.env.TOMBSTONE_PURGE_DAYS 
 const DEFAULT_DELETED_LOG_RETENTION_SECONDS =
     Number(process.env.SYNC_DELETED_LOG_RETENTION_DAYS ?? 730) * 24 * 3600;
 // TRASH_RETENTION_DAYS: how many days deleted items (deleted_at) survive in Trash before GC
-// hard-deletes (purges) them automatically.
-const DEFAULT_TRASH_RETENTION_SECONDS = Number(process.env.TRASH_RETENTION_DAYS ?? 30) * 24 * 3600;
+// hard-deletes (purges) them automatically. Exported because /instance-config tells the client
+// the same number — the Trash page's "N days left" used to be a second copy of it.
+export const TRASH_RETENTION_DAYS = Number(process.env.TRASH_RETENTION_DAYS ?? 30);
+const DEFAULT_TRASH_RETENTION_SECONDS = TRASH_RETENTION_DAYS * 24 * 3600;
 const DEFAULT_SHARE_ROW_RETENTION_SECONDS =
     Number(process.env.SHARE_ROW_RETENTION_DAYS ?? 90) * 24 * 3600;
 // Minimum age of a committed chunk set with no item row before runGc marks it an orphan.
@@ -113,6 +121,7 @@ export interface GcResult {
     authSessions: number;
     /** Sign-in failure runs that are neither locked nor inside their window any more. */
     signInFailures: number;
+    shareFailures: number;
     /** Counters from registered extension steps. Empty with no extension. */
     extensions: Record<string, number>;
     uploadSessions: number;
@@ -168,6 +177,8 @@ export async function runGc(opts: GcOptions = {}): Promise<GcResult> {
     // ── A.1. Lapsed sign-in failure runs ────────────────────────────────────────
     // Not per user: a run belongs to a source as much as to an account.
     const signInFailures = opts.userId ? 0 : await purgeStaleSignInFailures(now);
+    // The same for share-password runs (share_failures), one row per share and source.
+    const shareFailures = opts.userId ? 0 : await purgeStaleShareFailures(now);
 
     // Extension steps (the seam: `registerGcStep`). With no extension registered this is empty.
     const extensionCounts: Record<string, number> = {};
@@ -215,6 +226,7 @@ export async function runGc(opts: GcOptions = {}): Promise<GcResult> {
                 .select({
                     id: uploadSessions.id,
                     user_id: uploadSessions.user_id,
+                    storage_prefix: uploadSessions.storage_prefix,
                     total_size: uploadSessions.total_size,
                     status: uploadSessions.status,
                 })
@@ -236,7 +248,7 @@ export async function runGc(opts: GcOptions = {}): Promise<GcResult> {
             uploadSessionCount++;
             continue;
         }
-        await deleteS3Prefix(deleted.user_id, deleted.id);
+        await deleteS3Prefix(deleted.storage_prefix, deleted.id);
         uploadSessionCount++;
         bytesReclaimed += Number(deleted.total_size);
     }
@@ -245,7 +257,12 @@ export async function runGc(opts: GcOptions = {}): Promise<GcResult> {
     // This is the ONLY place where blobs are physically deleted.
     // The request path NEVER touches disk or R2 — it only sets pending_delete_at.
     const pendingBlobs = await db
-        .select({ id: chunkSets.id, user_id: chunkSets.user_id, total_size: chunkSets.total_size })
+        .select({
+            id: chunkSets.id,
+            user_id: chunkSets.user_id,
+            storage_prefix: chunkSets.storage_prefix,
+            total_size: chunkSets.total_size,
+        })
         .from(chunkSets)
         .where(
             and(
@@ -282,7 +299,7 @@ export async function runGc(opts: GcOptions = {}): Promise<GcResult> {
         });
         if (!deleted) continue;
         // Physical deletion of the S3 objects AFTER the DB commit
-        await deleteS3Prefix(cs.user_id, cs.id);
+        await deleteS3Prefix(cs.storage_prefix, cs.id);
         blobsPurged++;
         bytesReclaimed += Number(cs.total_size);
     }
@@ -474,7 +491,7 @@ export async function runGc(opts: GcOptions = {}): Promise<GcResult> {
             return p;
         });
         for (const p of prefixes) {
-            await deleteS3Prefix(p.userId, p.id);
+            await deleteS3Prefix(p.storagePrefix, p.id);
         }
         restoreSessionCount++;
     }
@@ -517,6 +534,7 @@ export async function runGc(opts: GcOptions = {}): Promise<GcResult> {
     return {
         authSessions,
         signInFailures,
+        shareFailures,
         extensions: extensionCounts,
         uploadSessions: uploadSessionCount,
         blobsPurged,
@@ -632,11 +650,15 @@ export async function runDeepRepair(opts: DeepRepairOptions = {}): Promise<DeepR
     // Do NOT drop a set still referenced by a non-purged item (a dangling item beats a silent
     // drop).
     const allSets = await db
-        .select({ id: chunkSets.id, user_id: chunkSets.user_id })
+        .select({
+            id: chunkSets.id,
+            user_id: chunkSets.user_id,
+            storage_prefix: chunkSets.storage_prefix,
+        })
         .from(chunkSets);
     for (const cs of allSets) {
         try {
-            if (!(await prefixHasObjects(`u/${cs.user_id}/${cs.id}/`))) {
+            if (!(await prefixHasObjects(chunkSetPrefix(cs.storage_prefix, cs.id)))) {
                 const [liveRef] = await db
                     .select({ id: items.id })
                     .from(items)

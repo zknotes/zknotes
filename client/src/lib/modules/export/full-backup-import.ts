@@ -4,6 +4,9 @@ import { strFromU8, unzipSync } from "fflate";
 import { decryptBackup, isEncryptedBackup } from "./backup-crypto";
 import type { BackupItem } from "./full-backup";
 
+/** A file entry's name inside the archive: the item id, nothing more. */
+const FILE_ENTRY_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
 export { isEncryptedBackup };
 
 export type ImportMode = "overwrite" | "skip";
@@ -32,11 +35,14 @@ export function parseBackupZip(bytes: Uint8Array): ParsedBackup {
 
     const items = JSON.parse(strFromU8(itemsEntry)) as BackupItem[];
 
+    // Only `files/<id>` is a file entry, and an id is one plain path segment. Anything else under
+    // files/ — a nested path, `..`, a name with a slash or a dot — is not something a backup we
+    // wrote contains, so it is left out rather than handed on as an id.
     const fileMap = new Map<string, Uint8Array>();
     for (const [path, data] of Object.entries(entries)) {
         if (path.startsWith("files/")) {
             const fileId = path.slice("files/".length);
-            if (fileId) fileMap.set(fileId, data);
+            if (FILE_ENTRY_ID.test(fileId)) fileMap.set(fileId, data);
         }
     }
 

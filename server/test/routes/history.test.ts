@@ -332,6 +332,53 @@ describe("GET /items/:id/history", () => {
 
 // ── GET /items/:id/history/:snapshotId ────────────────────────────────────────
 
+describe("GET /items/:id/history — a page is bounded by bytes, not only rows", () => {
+    test("stops the page at the byte cap and names where to continue", async () => {
+        const id = await createNote();
+        // Three snapshots whose payloads are each ~3/4 of a tiny cap: one fits per page.
+        const payload = Buffer.alloc(300, 7).toString("base64");
+        for (let i = 0; i < 3; i++) {
+            const { statusCode } = await postSnapshot(id, cookie, { encrypted_payload: payload });
+            expect(statusCode).toBe(201);
+            // Distinct created_at seconds, so `before` (strictly earlier) can separate them.
+            await new Promise((r) => setTimeout(r, 1100));
+        }
+        process.env.HISTORY_PAGE_MAX_BYTES = "400";
+        try {
+            const first = await app.inject({
+                method: "GET",
+                url: `/items/${id}/history?limit=50`,
+                headers: { cookie },
+            });
+            expect(first.statusCode).toBe(200);
+            const page1 = first.json() as { snapshots: unknown[]; next_before: number | null };
+            expect(page1.snapshots).toHaveLength(1);
+            expect(page1.next_before).not.toBeNull();
+
+            const second = await app.inject({
+                method: "GET",
+                url: `/items/${id}/history?limit=50&before=${page1.next_before}`,
+                headers: { cookie },
+            });
+            const page2 = second.json() as { snapshots: unknown[]; next_before: number | null };
+            expect(page2.snapshots).toHaveLength(1);
+            expect(page2.next_before).not.toBeNull();
+        } finally {
+            delete process.env.HISTORY_PAGE_MAX_BYTES;
+        }
+
+        // Without the cap the same list comes in one page, with no continuation.
+        const whole = await app.inject({
+            method: "GET",
+            url: `/items/${id}/history?limit=50`,
+            headers: { cookie },
+        });
+        const all = whole.json() as { snapshots: unknown[]; next_before: number | null };
+        expect(all.snapshots).toHaveLength(3);
+        expect(all.next_before).toBeNull();
+    }, 15_000);
+});
+
 describe("GET /items/:id/history/:snapshotId", () => {
     test("without a session → 401", async () => {
         const res = await app.inject({
@@ -749,7 +796,8 @@ describe("POST /items/:id/history — further validation", () => {
         const id = await createNote();
         const uniquePayload = "dGVzdFBheWxvYWQxMjM="; // base64 that is easy to recognise
         const uniqueNonce = "Q".repeat(32);
-        const uniqueIk = "cGVybVNlY3JldEtleQ==";
+        // A real wrapped item key: 48 bytes (32 key + 16 tag) as 64 canonical base64 characters.
+        const uniqueIk = Buffer.alloc(48, 0x4b).toString("base64");
         const uniqueIkNonce = "Z".repeat(32);
 
         const { body } = await postSnapshot(id, cookie, {

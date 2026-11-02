@@ -70,6 +70,15 @@ describe("About — Verify this build", () => {
         expect(root.textContent).not.toContain("Verify this build");
     });
 
+    it("links to the third-party notices that ship with the build", async () => {
+        vi.mocked(loadInstancePublicConfig).mockResolvedValue({});
+        const root = await render();
+
+        const link = root.querySelector<HTMLAnchorElement>("#about-licenses-btn");
+        expect(link?.getAttribute("href")).toBe("/third-party-licenses.txt");
+        expect(link?.rel).toContain("noopener");
+    });
+
     it("shows the full commit the user compares with version.json", async () => {
         vi.mocked(loadInstancePublicConfig).mockResolvedValue({});
         const root = await render();

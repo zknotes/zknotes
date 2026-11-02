@@ -19,7 +19,16 @@ export const S3_BUCKET = process.env.S3_BUCKET || "zknotes";
 
 /** The credentials the development stack and server/.env.example ship with. */
 const DEV_S3_CREDENTIALS = new Set(["minioadmin", "minioadmin-dev-secret"]);
-const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "0.0.0.0"]);
+/**
+ * Whether a URL's host is this machine: `localhost` and its subdomains, any 127.0.0.0/8 address
+ * (not only 127.0.0.1), the IPv6 loopback with or without brackets, and the unspecified addresses.
+ */
+export function isLoopbackHost(hostname: string): boolean {
+    const h = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    if (h === "localhost" || h.endsWith(".localhost")) return true;
+    if (/^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h)) return true;
+    return h === "::1" || h === "0.0.0.0" || h === "::" || h === "::ffff:127.0.0.1";
+}
 
 /**
  * What is wrong with an S3 configuration for production, one sentence per problem. Without this the
@@ -46,7 +55,7 @@ export function productionS3ConfigProblems(env: {
         // Browsers upload straight to S3_ENDPOINT, so it must be an address they can reach — and,
         // from an https:// page, an https:// one: a plain http:// endpoint (a Docker service name,
         // typically) is blocked as mixed content.
-        if (url && LOOPBACK_HOSTS.has(url.hostname))
+        if (url && isLoopbackHost(url.hostname))
             problems.push("S3_ENDPOINT points at this machine's loopback.");
         else if (url && url.protocol !== "https:")
             problems.push("S3_ENDPOINT is not an https:// address.");

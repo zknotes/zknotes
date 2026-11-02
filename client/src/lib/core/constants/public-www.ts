@@ -14,6 +14,8 @@ export type InstancePublicConfig = {
     /** Where a user learns how to check that this instance serves the published build. */
     verifyUrl?: string;
     account?: { manageUrl?: string };
+    /** Days an item stays in Trash before the server purges it (the instance's TRASH_RETENTION_DAYS). */
+    trashRetentionDays?: number;
 };
 
 let cached: InstancePublicConfig | null = null;
@@ -48,11 +50,17 @@ function parseConfig(raw: unknown): InstancePublicConfig {
         accountRaw && typeof accountRaw === "object"
             ? asPublicUrl((accountRaw as Record<string, unknown>).manageUrl)
             : undefined;
+    const retentionRaw = obj.trashRetentionDays;
+    const trashRetentionDays =
+        typeof retentionRaw === "number" && Number.isInteger(retentionRaw) && retentionRaw > 0
+            ? retentionRaw
+            : undefined;
     return {
         ...(wwwUrl ? { wwwUrl } : {}),
         ...(sourceUrl ? { sourceUrl } : {}),
         ...(verifyUrl ? { verifyUrl } : {}),
         ...(manageUrl ? { account: { manageUrl } } : {}),
+        ...(trashRetentionDays ? { trashRetentionDays } : {}),
     };
 }
 
