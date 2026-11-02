@@ -36,6 +36,15 @@ vi.mock("./upload-heartbeat", async (importOriginal) => ({
     pingOrExpire: pingOrExpireMock,
 }));
 
+// abortPendingUpload (the afterEach cleanup) sends a real DELETE for every row that carries a
+// chunk_set_id. Nothing listens on the API port in a unit run, and on some hosts (WSL) the connect
+// hangs instead of being refused, so each such test died on the 10 s hook timeout. The server call
+// is not what these tests exercise — stub it; the rest of the module stays real.
+vi.mock("$lib/core/api/files", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("$lib/core/api/files")>()),
+    abortUpload: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { ApiError } from "$lib/core/api/client";
 import { APP_EVENTS } from "$lib/core/constants/events";
 import { getDB, type PendingUpload } from "$lib/core/db";
