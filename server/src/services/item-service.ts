@@ -68,6 +68,41 @@ export async function trashTransitionDeltas(
 
 type ItemRow = typeof items.$inferSelect;
 
+/** The committed size of a chunk set, or undefined when there is no such row. */
+export async function chunkSetTotalSize(
+    tx: DbExecutor,
+    chunkSetId: string,
+): Promise<number | undefined> {
+    const [cs] = await tx
+        .select({ total_size: chunkSets.total_size })
+        .from(chunkSets)
+        .where(eq(chunkSets.id, chunkSetId))
+        .limit(1);
+    return cs ? Number(cs.total_size) : undefined;
+}
+
+/**
+ * A chunk set that has just been bound to an item sitting in the TRASH: the upload reserved its
+ * bytes in `files` (and `bindFileSet` re-charges a reclaimed set there too), but the bytes of a
+ * trashed file belong in `trash`. Moves them — unless another live item still references the set,
+ * in which case `files` is where they stay. Both create paths (an item that arrives already
+ * trashed) and both update paths (a crop swap on a trashed item) need this.
+ */
+export async function moveBoundSetToTrash(
+    tx: DbExecutor,
+    userId: string,
+    chunkSetId: string,
+    itemId: string,
+    opts?: { sizeHint?: number; accumulator?: QuotaAccumulator },
+): Promise<void> {
+    if (await hasOtherLiveChunkSetRef(tx, chunkSetId, userId, itemId)) return;
+    const size = opts?.sizeHint ?? (await chunkSetTotalSize(tx, chunkSetId));
+    if (!size) return;
+    await updateQuotaTx(tx, userId, { files: -size, trash: size }, false, {
+        accumulator: opts?.accumulator,
+    });
+}
+
 /**
  * Release a chunk set (pending_delete + storage_used) only when no other non-purged item references
  * it — one source of truth for the purge and crop-swap paths (conflict copies share a set).
@@ -686,6 +721,15 @@ export async function createItemTx(
         return { kind: "error", status: 429, error: "file_count_limit_exceeded" };
     }
     const row = await insertItemRow(executor, userId, data);
+    // A file that arrives already trashed (created and trashed offline before the first push): its
+    // blob was reserved in `files` by the upload, but the item is in the trash — see quotas.md,
+    // "everything in the trash counts in storage_used_trash". The payload bytes are the caller's
+    // (it charged them before this call, so a refused insert rolls them back).
+    if (row.deleted_at != null && row.chunk_set_id) {
+        await moveBoundSetToTrash(executor, userId, row.chunk_set_id, row.id, {
+            accumulator: opts?.accumulator,
+        });
+    }
     return { kind: "created", row };
 }
 

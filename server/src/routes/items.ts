@@ -24,12 +24,14 @@ import { requireUserId } from "../plugins/auth";
 import {
     bindFileSet,
     buildFolderParentMap,
+    chunkSetTotalSize,
     countLiveFiles,
     createItemTx,
     fileSetBindable,
     getOwnedItem,
     hasOtherLiveChunkSetRef,
     ItemRejected,
+    moveBoundSetToTrash,
     parentRejection,
     purgeOwnedItem,
     purgeOwnedItemsBatch,
@@ -311,6 +313,10 @@ const itemRoutes: FastifyPluginAsync = async (fastify) => {
         // The preconditions (chunk set committed, the file-count quota) and the insert are shared with the batch create
         // branch through createItemTx.
         const dItems = getItemStorageSize(data);
+        // An item may arrive already trashed (created and trashed offline before the first push); its
+        // bytes then belong in the trash bucket, not in items — otherwise the purge later releases
+        // them from `trash` and `items` stays inflated until the weekly deep repair.
+        const createBucket = data.deleted_at != null ? "trash" : "items";
         try {
             const outcome = await db.transaction(async (tx) => {
                 // Item-count ceiling — on creation only, inside the same transaction as the insert
@@ -318,7 +324,7 @@ const itemRoutes: FastifyPluginAsync = async (fastify) => {
                 if (await itemCountExceeded(tx, userId, 1)) {
                     throw new ItemRejected(413, "item_limit_exceeded");
                 }
-                await updateQuotaTx(tx, userId, { items: dItems }, true);
+                await updateQuotaTx(tx, userId, { [createBucket]: dItems }, true);
                 const res = await createItemTx(tx, userId, data);
                 if (res.kind === "error") throw new ItemRejected(res.status, res.error);
                 return res;
@@ -421,6 +427,11 @@ const itemRoutes: FastifyPluginAsync = async (fastify) => {
                 ) {
                     const bound = await bindFileSet(tx, userId, data.chunk_set_id);
                     if (!bound.ok) throw new ItemRejected(bound.status, bound.error);
+                    // A crop swap on a file that sits in the trash: the new set's bytes belong
+                    // with the item, in `trash`.
+                    if (locked.deleted_at != null) {
+                        await moveBoundSetToTrash(tx, userId, data.chunk_set_id, id);
+                    }
                 }
 
                 // Folder-move TOCTOU (the same pattern as batch): the pre-flight cycle check
@@ -481,10 +492,15 @@ const itemRoutes: FastifyPluginAsync = async (fastify) => {
 
                 if (
                     data.chunk_set_id !== undefined &&
-                    current.chunk_set_id &&
-                    current.chunk_set_id !== data.chunk_set_id
+                    locked.chunk_set_id &&
+                    locked.chunk_set_id !== data.chunk_set_id
                 ) {
-                    await releaseChunkSetIfUnreferenced(tx, current.chunk_set_id, userId, id);
+                    // The row no longer points at the old set, so its bucket cannot be read from
+                    // an item any more: a PUT never changes the trash state, so it is the bucket the
+                    // item is counted in now.
+                    await releaseChunkSetIfUnreferenced(tx, locked.chunk_set_id, userId, id, {
+                        bucket: locked.deleted_at != null ? "trash" : "files",
+                    });
                 }
                 return row;
             });
@@ -823,10 +839,17 @@ const itemRoutes: FastifyPluginAsync = async (fastify) => {
                                 errors.push({ id: itemData.id, error: "item_limit_exceeded" });
                                 continue;
                             }
+                            // The same bucket rule as POST /items: an item that arrives already
+                            // trashed is counted in `trash` from the start.
+                            const createBucket = itemData.deleted_at != null ? "trash" : "items";
                             try {
-                                await updateQuotaTx(tx, userId, { items: newPayloadSize }, true, {
-                                    accumulator: quotaAcc,
-                                });
+                                await updateQuotaTx(
+                                    tx,
+                                    userId,
+                                    { [createBucket]: newPayloadSize },
+                                    true,
+                                    { accumulator: quotaAcc },
+                                );
                             } catch (e: any) {
                                 if (e instanceof QuotaExceededError) {
                                     errors.push({ id: itemData.id, error: "hard_limit_exceeded" });
@@ -847,9 +870,13 @@ const itemRoutes: FastifyPluginAsync = async (fastify) => {
                                 // precondition check in createItemTx — without this it would stay
                                 // "taken" with no item behind it (quota drift that accumulates with
                                 // every rejected item in the batch).
-                                await updateQuotaTx(tx, userId, { items: -newPayloadSize }, false, {
-                                    accumulator: quotaAcc,
-                                });
+                                await updateQuotaTx(
+                                    tx,
+                                    userId,
+                                    { [createBucket]: -newPayloadSize },
+                                    false,
+                                    { accumulator: quotaAcc },
+                                );
                                 errors.push({ id: itemData.id, error: outcome.error });
                                 continue;
                             }
@@ -923,6 +950,12 @@ const itemRoutes: FastifyPluginAsync = async (fastify) => {
                             // bucket (the ciphertext is not deleted on soft-delete), so every
                             // transition has to move it too, not just the blob. The bytes are always
                             // in EXACTLY one bucket.
+                            // The set the row points at NOW. The prefetched map holds only the
+                            // sets the request names, so a crop swap arriving together with the
+                            // trash (or the restore) asks the database for the old set's size.
+                            const sizeOfSet = async (chunkSetId: string) =>
+                                chunkSetMap.get(chunkSetId)?.total_size ??
+                                (await chunkSetTotalSize(tx, chunkSetId));
                             if (!wasTrashed && isTrashed) {
                                 // READY → TRASHED: payload and blob move into `trash`.
                                 const d = await trashTransitionDeltas(
@@ -930,28 +963,32 @@ const itemRoutes: FastifyPluginAsync = async (fastify) => {
                                     current,
                                     userId,
                                     oldPayloadSize,
-                                    async (chunkSetId) => chunkSetMap.get(chunkSetId)?.total_size,
+                                    sizeOfSet,
                                 );
                                 dItems += d.items;
                                 dFiles += d.files;
                                 dTrash += d.trash;
                             } else if (wasTrashed && !isTrashed) {
-                                // TRASHED → READY: the new payload enters `items`, the old one leaves `trash`.
+                                // TRASHED → READY: the new payload enters `items`, the old one
+                                // leaves `trash`. The blob that moves back is the one the item HAD
+                                // in the trash (`current.chunk_set_id`): a set arriving with the
+                                // restore was reserved in `files` by its upload and is already
+                                // where a live item's blob belongs.
                                 dItems = newPayloadSize;
                                 dTrash -= oldPayloadSize;
                                 if (
-                                    itemData.chunk_set_id &&
+                                    current.chunk_set_id &&
                                     !(await hasOtherLiveChunkSetRef(
                                         tx,
-                                        itemData.chunk_set_id,
+                                        current.chunk_set_id,
                                         userId,
                                         itemData.id,
                                     ))
                                 ) {
-                                    const cs = chunkSetMap.get(itemData.chunk_set_id);
-                                    if (cs) {
-                                        dFiles += cs.total_size;
-                                        dTrash -= cs.total_size;
+                                    const size = await sizeOfSet(current.chunk_set_id);
+                                    if (size) {
+                                        dFiles += size;
+                                        dTrash -= size;
                                     }
                                 }
                             } else if (!wasTrashed && !isTrashed) {
@@ -1015,13 +1052,34 @@ const itemRoutes: FastifyPluginAsync = async (fastify) => {
                                 itemData.chunk_set_id &&
                                 current.chunk_set_id !== itemData.chunk_set_id
                             ) {
+                                // The transitions above carried the OLD set along with the item,
+                                // so it sits in the bucket of the item's new state; and the row no
+                                // longer points at it, so that bucket has to be named here.
                                 await releaseChunkSetIfUnreferenced(
                                     tx,
                                     current.chunk_set_id,
                                     userId,
                                     itemData.id,
-                                    { accumulator: quotaAcc },
+                                    {
+                                        accumulator: quotaAcc,
+                                        bucket: isTrashed ? "trash" : "files",
+                                    },
                                 );
+                                // The NEW set was reserved in `files` by its upload; a trashed
+                                // item's blob belongs in `trash`.
+                                if (isTrashed) {
+                                    await moveBoundSetToTrash(
+                                        tx,
+                                        userId,
+                                        itemData.chunk_set_id,
+                                        itemData.id,
+                                        {
+                                            sizeHint: chunkSetMap.get(itemData.chunk_set_id)
+                                                ?.total_size,
+                                            accumulator: quotaAcc,
+                                        },
+                                    );
+                                }
                             }
                         }
                     }

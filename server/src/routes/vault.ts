@@ -32,64 +32,65 @@ const postgresErrorCode = (err: unknown): string | undefined => {
     return typeof nested === "string" ? nested : undefined;
 };
 
+/**
+ * The options of `POST /vault`: the response floor (registering an address that already exists
+ * answers the same 201 as a new one, and the floor keeps the timing from telling them apart), the
+ * small body limit of the credential routes and the per-IP limit of registration. Exported so an
+ * extension that takes the route over (seam 3) keeps these defences instead of rebuilding them.
+ */
+export const vaultRouteOptions = {
+    ...authResponseFloor,
+    bodyLimit: AUTH_BODY_LIMIT,
+    config: { rateLimit: ipRateLimit(RL_REGISTER_MAX, RL_WINDOW) },
+};
+
 const vaultRoutes: FastifyPluginAsync = async (fastify) => {
     // Seam 3: if an extension has already registered its own version, the core skips its own.
     if (fastify.hasRoute({ method: "POST", url: "/vault" })) return;
 
-    fastify.post(
-        "/vault",
-        {
-            // Registering an address that already exists answers the same 201 as a new one; the
-            // floor keeps the timing from telling them apart.
-            ...authResponseFloor,
-            bodyLimit: AUTH_BODY_LIMIT,
-            config: { rateLimit: ipRateLimit(RL_REGISTER_MAX, RL_WINDOW) },
-        },
-        async (request, reply) => {
-            const parsed = VaultCreateSchema.safeParse(request.body);
-            if (!parsed.success) return reply.status(400).send({ error: "invalid_request" });
+    fastify.post("/vault", vaultRouteOptions, async (request, reply) => {
+        const parsed = VaultCreateSchema.safeParse(request.body);
+        if (!parsed.success) return reply.status(400).send({ error: "invalid_request" });
 
-            // Same predicate `GET /auth/registration-status` publishes — asked of the provider (seam 2),
-            // so the two cannot drift: if the UI says a vault can be opened, this route allows it.
-            const status =
-                (await fastify.entitlements.registrationStatus?.(db)) ?? OPEN_REGISTRATION;
-            if (!status.open) {
+        // Same predicate `GET /auth/registration-status` publishes — asked of the provider (seam 2),
+        // so the two cannot drift: if the UI says a vault can be opened, this route allows it.
+        const status = (await fastify.entitlements.registrationStatus?.(db)) ?? OPEN_REGISTRATION;
+        if (!status.open) {
+            return reply.status(403).send({ error: "registration_closed" });
+        }
+
+        try {
+            const userId = await db.transaction(async (tx) => {
+                // The check above runs before the transaction, so two requests that both saw an
+                // instance with no user could both create one. Vault creation is serialised
+                // here and the question asked again: the second request now sees the first
+                // vault (READ COMMITTED reads what committed before the lock was granted).
+                await tx.execute(sql`SELECT pg_advisory_xact_lock(${VAULT_CREATE_LOCK_KEY})`);
+                const inside =
+                    (await fastify.entitlements.registrationStatus?.(tx)) ?? OPEN_REGISTRATION;
+                if (!inside.open) return null;
+                return createVaultUser(tx, parsed.data, fastify.entitlements.quotaForNewUser());
+            });
+            if (userId === null) {
                 return reply.status(403).send({ error: "registration_closed" });
             }
-
-            try {
-                const userId = await db.transaction(async (tx) => {
-                    // The check above runs before the transaction, so two requests that both saw an
-                    // instance with no user could both create one. Vault creation is serialised
-                    // here and the question asked again: the second request now sees the first
-                    // vault (READ COMMITTED reads what committed before the lock was granted).
-                    await tx.execute(sql`SELECT pg_advisory_xact_lock(${VAULT_CREATE_LOCK_KEY})`);
-                    const inside =
-                        (await fastify.entitlements.registrationStatus?.(tx)) ?? OPEN_REGISTRATION;
-                    if (!inside.open) return null;
-                    return createVaultUser(tx, parsed.data, fastify.entitlements.quotaForNewUser());
-                });
-                if (userId === null) {
-                    return reply.status(403).send({ error: "registration_closed" });
-                }
-                fastify.emitUserRegistered({ userId });
-                return reply.status(201).send({ created: true });
-            } catch (err) {
-                if (err instanceof Error && err.message === "weak_kdf_params") {
-                    return reply.status(400).send({ error: "weak_kdf_params" });
-                }
-                if (err instanceof Argon2BacklogError) {
-                    return reply.status(503).send({ error: "service_unavailable" });
-                }
-                // Unique email (users_email_lower_idx / users_email_idx): same 201 as success so a
-                // duplicate cannot be distinguished from a new vault. Do not emit registration.
-                if (postgresErrorCode(err) === "23505") {
-                    return reply.status(201).send({ created: true });
-                }
-                throw err;
+            fastify.emitUserRegistered({ userId });
+            return reply.status(201).send({ created: true });
+        } catch (err) {
+            if (err instanceof Error && err.message === "weak_kdf_params") {
+                return reply.status(400).send({ error: "weak_kdf_params" });
             }
-        },
-    );
+            if (err instanceof Argon2BacklogError) {
+                return reply.status(503).send({ error: "service_unavailable" });
+            }
+            // Unique email (users_email_lower_idx / users_email_idx): same 201 as success so a
+            // duplicate cannot be distinguished from a new vault. Do not emit registration.
+            if (postgresErrorCode(err) === "23505") {
+                return reply.status(201).send({ created: true });
+            }
+            throw err;
+        }
+    });
 };
 
 export default vaultRoutes;
