@@ -1,7 +1,7 @@
 {
     "name": "zknotes",
     "license": "AGPL-3.0-only",
-    "version": "0.3.0",
+    "version": "0.3.1",
     "private": true,
     "packageManager": "bun@1.4.2",
     "homepage": "https://zknotes.eu",
