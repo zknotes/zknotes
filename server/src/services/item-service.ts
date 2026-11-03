@@ -138,7 +138,24 @@ export async function releaseChunkSetIfUnreferenced(
         .where(and(...refConditions))
         .limit(1);
 
-    if (stillReferenced) return;
+    if (stillReferenced) {
+        // The set stays — but its bucket follows the invariant: `files` while a LIVE item holds
+        // it, `trash` otherwise. A restore that pointed the live item at a new set can leave the
+        // old one held only by a copy in the Trash; counted under `files` it would sit there
+        // until the weekly reconcile. One more query, on this branch only.
+        if (opts?.bucket === "files") {
+            const live = await hasOtherLiveChunkSetRef(tx, chunkSetId, userId, excludeItemId ?? "");
+            if (!live) {
+                const size = await chunkSetTotalSize(tx, chunkSetId);
+                if (size) {
+                    await updateQuotaTx(tx, userId, { files: -size, trash: size }, false, {
+                        accumulator: opts?.accumulator,
+                    });
+                }
+            }
+        }
+        return;
+    }
 
     // Read the size and trash state BEFORE the mark (the row still exists after it).
     const [cs] = await tx

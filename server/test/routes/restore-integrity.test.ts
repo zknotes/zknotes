@@ -66,6 +66,18 @@ async function stage(sessionId: string, payloads: unknown[]) {
     expect(res.statusCode).toBe(200);
 }
 
+/** Staging refused for a parent of the wrong kind — before any blob of the child is uploaded. */
+async function stageRefusedParentType(sessionId: string, payloads: unknown[], ids: string[]) {
+    const res = await post(`/restore/sessions/${sessionId}/items`, { items: payloads });
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toEqual({ error: "parent_type_mismatch", ids });
+}
+
+async function trash(id: string) {
+    const res = await app.inject({ method: "DELETE", url: `/items/${id}`, headers: { cookie } });
+    expect(res.statusCode).toBe(200);
+}
+
 /** A chunk set the restore uploaded, as the upload commit leaves it. */
 async function stagedChunkSet(sessionId: string, totalSize = FILE_SIZE): Promise<string> {
     const id = uuidv7();
@@ -136,17 +148,37 @@ describe("a restore cannot change an item's type", () => {
         expect(await storedType(e)).toBe("folder");
     });
 
-    test("a staged note cannot sit under a staged note", async () => {
+    test("a staged note cannot sit under a staged note — the preflight and the staging both say so", async () => {
         const parent = uuidv7();
         const child = uuidv7();
-        const sessionId = await openOverwrite([
-            { id: parent, type: "note", parent_id: null },
-            { id: child, type: "note", parent_id: parent },
+        const open = await post("/restore/sessions", {
+            backup_hash: "b".repeat(64),
+            manifest: [
+                { id: parent, type: "note", parent_id: null, byte_size: 16 },
+                { id: child, type: "note", parent_id: parent, byte_size: 16 },
+            ],
+            mode: "overwrite_all",
+        });
+        expect(open.statusCode).toBe(201);
+        const verdict = open.json().verdict as {
+            ok: boolean;
+            blockers: { code: string }[];
+            parent_type_mismatches: unknown[];
+        };
+        expect(verdict.ok).toBe(false);
+        expect(verdict.blockers.map((b) => b.code)).toContain("parent_type_mismatch");
+        expect(verdict.parent_type_mismatches).toEqual([
+            { child_id: child, parent_id: parent, parent_type: "note" },
         ]);
-        await stage(sessionId, [notePayload(parent), notePayload(child, { parent_id: parent })]);
+        const sessionId = open.json().restore_session_id as string;
 
-        const res = await commit(sessionId);
-        expect(res.statusCode).toBe(409);
+        // The child is refused where it is sent; the parent alone is fine.
+        await stageRefusedParentType(
+            sessionId,
+            [notePayload(parent), notePayload(child, { parent_id: parent })],
+            [child],
+        );
+        await stage(sessionId, [notePayload(parent)]);
         expect(await storedType(child)).toBeUndefined();
     });
 
@@ -155,10 +187,13 @@ describe("a restore cannot change an item's type", () => {
         const child = uuidv7();
         expect((await post("/items", notePayload(parent))).statusCode).toBe(201);
 
+        // The parent is outside the backup: its kind comes from the server row, one query per batch.
         const sessionId = await openOverwrite([{ id: child, type: "note", parent_id: parent }]);
-        await stage(sessionId, [notePayload(child, { parent_id: parent })]);
-
-        expect((await commit(sessionId)).statusCode).toBe(409);
+        await stageRefusedParentType(
+            sessionId,
+            [notePayload(child, { parent_id: parent })],
+            [child],
+        );
     });
 
     test("a staged file belongs under a note, not directly in a folder", async () => {
@@ -180,11 +215,26 @@ describe("a restore cannot change an item's type", () => {
             { id: folder, type: "folder", parent_id: null },
             { id: inFolder, type: "file", parent_id: folder },
         ]);
-        await stage(bad, [
-            folderPayload(folder),
-            filePayload(inFolder, await stagedChunkSet(bad), { parent_id: folder }),
+        await stageRefusedParentType(
+            bad,
+            [
+                folderPayload(folder),
+                filePayload(inFolder, await stagedChunkSet(bad), { parent_id: folder }),
+            ],
+            [inFolder],
+        );
+    });
+
+    test("verify is still the last line: a parent whose kind is unknown at staging is checked there", async () => {
+        // The parent is neither in the backup nor on the server, so staging cannot know its kind
+        // and lets the child through; verify then finds no parent at all.
+        const ghostParent = uuidv7();
+        const child = uuidv7();
+        const sessionId = await openOverwrite([
+            { id: child, type: "note", parent_id: ghostParent },
         ]);
-        const res = await commit(bad);
+        await stage(sessionId, [notePayload(child, { parent_id: ghostParent })]);
+        const res = await commit(sessionId);
         expect(res.statusCode).toBe(409);
         expect((res.json().blockers as { code: string }[]).map((b) => b.code)).toContain(
             "orphan_parent",
@@ -209,6 +259,27 @@ describe("a restore releases a replaced chunk set only when nothing references i
         // Still referenced by the copy: not scheduled for deletion, and still counted.
         expect(await getChunkSetPendingDeleteAt(original.chunkSetId)).toBeNull();
         expect(await getUserStorageUsed(email)).toBe(filesBefore);
+    });
+
+    test("a replaced set held only by a copy in the Trash moves to the trash bucket at once", async () => {
+        const original = await liveFile();
+        const copy = await liveFile(original.chunkSetId);
+        // The copy goes to the Trash while the original is live: the set stays under files.
+        await trash(copy.itemId);
+        const filesBefore = await getUserStorageUsed(email);
+        const trashBefore = await getUserStorageUsedTrash(email);
+
+        const sessionId = await openOverwrite([
+            { id: original.itemId, type: "file", parent_id: null },
+        ]);
+        const newSet = await stagedChunkSet(sessionId);
+        await stage(sessionId, [filePayload(original.itemId, newSet)]);
+        expect((await commit(sessionId)).statusCode).toBe(200);
+
+        // Kept (the copy still holds it), but counted where its only holder is: in the trash.
+        expect(await getChunkSetPendingDeleteAt(original.chunkSetId)).toBeNull();
+        expect(await getUserStorageUsed(email)).toBe(filesBefore - FILE_SIZE);
+        expect(await getUserStorageUsedTrash(email)).toBe(trashBefore + FILE_SIZE);
     });
 
     test("a set two restored files shared is released — and its bytes freed — once", async () => {

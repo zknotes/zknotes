@@ -80,6 +80,8 @@ interface RestoreVerdict {
     /** A purged manifest id → the id it comes back under; the client stages under this. */
     remaps: Record<string, string>;
     orphan_parents: Array<{ child_id: string; parent_id: string }>;
+    /** Children whose parent exists but is the wrong kind (a file under a folder, a note under a note). */
+    parent_type_mismatches: Array<{ child_id: string; parent_id: string; parent_type: string }>;
     quota: {
         current_used: number;
         quota: number;
@@ -324,6 +326,14 @@ async function computeVerdict(
     let itemCreates = 0;
     let fileCreates = 0;
     const orphanParents: Array<{ child_id: string; parent_id: string }> = [];
+    const parentTypeMismatches: Array<{
+        child_id: string;
+        parent_id: string;
+        parent_type: string;
+    }> = [];
+    // The manifest already names every entry's type; a parent inside the backup is checked against
+    // that, a parent outside it against the server row loaded for the orphan pass below.
+    const manifestType = new Map(manifest.map((m) => [m.id, m.type] as const));
 
     for (const entry of manifest) {
         const ownKind = classify(existing.get(entry.id));
@@ -386,7 +396,21 @@ async function computeVerdict(
             : classify(extraParents.get(entry.parent_id));
         if (!parentLiveAfterCommit(entry.parent_id, mode, parentInBackup, parentKind)) {
             orphanParents.push({ child_id: entry.id, parent_id: entry.parent_id });
+            continue;
         }
+        const parentType = parentInBackup
+            ? manifestType.get(entry.parent_id)
+            : extraParents.get(entry.parent_id)?.type;
+        if (parentType !== undefined && parentType !== parentTypeWanted(entry.type)) {
+            parentTypeMismatches.push({
+                child_id: entry.id,
+                parent_id: entry.parent_id,
+                parent_type: parentType,
+            });
+        }
+    }
+    if (parentTypeMismatches.length > 0) {
+        blockers.push({ code: "parent_type_mismatch", items: parentTypeMismatches });
     }
 
     if (exhausted.length > 0) {
@@ -483,6 +507,7 @@ async function computeVerdict(
         collisions: { live, trashed, purged },
         remaps,
         orphan_parents: orphanParents,
+        parent_type_mismatches: parentTypeMismatches,
         quota: {
             current_used: currentUsed,
             quota,
@@ -618,13 +643,18 @@ async function unprovenStagedIds(
  * as the item routes. It keeps the tree a tree of folders, the folder cycle check meaningful, and
  * every file reachable through its note.
  */
+/** The only kind of parent an item of `type` may have: a file hangs off a note, everything else off a folder. */
+function parentTypeWanted(type: string): "note" | "folder" {
+    return type === "file" ? "note" : "folder";
+}
+
 function stagedParentOk(
     row: { type: string; parent_id: string | null },
     stagedTypes: Map<string, string>,
     existing: Map<string, ItemRow>,
 ): boolean {
     if (!row.parent_id) return true;
-    const wanted = row.type === "file" ? "note" : "folder";
+    const wanted = parentTypeWanted(row.type);
     const stagedType = stagedTypes.get(row.parent_id);
     if (stagedType !== undefined) return stagedType === wanted;
     const parent = existing.get(row.parent_id);
@@ -793,6 +823,38 @@ const restoreRoutes: FastifyPluginAsync = async (fastify) => {
                     throw new RestoreConflict(409, {
                         error: "not_in_manifest",
                         ids: notInManifest,
+                    });
+                }
+
+                // A parent of the wrong kind is refused here, before any blob is uploaded for the
+                // child — verify used to be the first place to say so. The manifest names the type
+                // of every parent inside the backup; parents outside it cost one query per batch.
+                // A parent whose type is not knowable yet (not in the backup, not on the server) is
+                // left to verify, which also checks that it exists.
+                const manifestType = new Map(session.manifest.map((m) => [m.id, m.type] as const));
+                const outsideParents = [
+                    ...new Set(
+                        data.items
+                            .map((i) => i.parent_id)
+                            .filter((p): p is string => p != null && !manifestType.has(p)),
+                    ),
+                ];
+                const serverParents =
+                    outsideParents.length > 0
+                        ? await loadItemsByIds(tx, userId, outsideParents)
+                        : new Map<string, ItemRow>();
+                const wrongParent = data.items
+                    .filter((i) => {
+                        if (!i.parent_id) return false;
+                        const parentType =
+                            manifestType.get(i.parent_id) ?? serverParents.get(i.parent_id)?.type;
+                        return parentType !== undefined && parentType !== parentTypeWanted(i.type);
+                    })
+                    .map((i) => i.id);
+                if (wrongParent.length > 0) {
+                    throw new RestoreConflict(409, {
+                        error: "parent_type_mismatch",
+                        ids: wrongParent,
                     });
                 }
 

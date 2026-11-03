@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+### Fixed
+
+- Restoring a backup now tells you before any upload when an item in it sits under the wrong
+  kind of parent (a file outside a note, a note under a note): the preflight names it and the
+  wizard refuses to stage it, instead of finding out at the final check after every file was
+  already sent.
+- After a restore replaced a file whose old content was still shared by a copy in the Trash, that
+  old content stayed counted as a live file in your storage until the weekly reconcile. It now
+  moves to the Trash share of your storage at once.
+
 ## [0.3.1] - 2026-11-03
 
 ### Fixed

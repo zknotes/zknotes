@@ -81,6 +81,7 @@ vi.mock("$lib/core/api/restore", () => {
         },
         collisions: { live: [], trashed: [], purged: [] },
         orphan_parents: [],
+        parent_type_mismatches: [],
         quota: {
             current_used: 0,
             quota: 1_000_000,

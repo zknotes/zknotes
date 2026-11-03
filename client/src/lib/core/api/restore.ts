@@ -34,6 +34,8 @@ export interface RestoreVerdict {
     /** A purged manifest id → the id it comes back under; the wizard stages under it. */
     remaps: Record<string, string>;
     orphan_parents: Array<{ child_id: string; parent_id: string }>;
+    /** Children whose parent is the wrong kind (a file under a folder, say); the restore cannot run. */
+    parent_type_mismatches: Array<{ child_id: string; parent_id: string; parent_type: string }>;
     quota: {
         current_used: number;
         quota: number;

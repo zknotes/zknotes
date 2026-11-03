@@ -803,6 +803,9 @@ onMount(() => {
                             {#if restoreSession.verdict.orphan_parents.length > 0}
                                 <li>Some items cannot be restored because their folder is in Trash. Change mode or cancel.</li>
                             {/if}
+                            {#if restoreSession.verdict.parent_type_mismatches.length > 0}
+                                <li>Some items in this backup sit under the wrong kind of parent (a file outside a note, say), so it cannot be restored as it is.</li>
+                            {/if}
                         </ul>
                     {/if}
 
@@ -821,7 +824,7 @@ onMount(() => {
                                 variant="primary"
                                 size="lg"
                                 class="flex-1"
-                                disabled={!!restoreSession && (!restoreSession.verdict.ok || restoreSession.verdict.orphan_parents.length > 0)}
+                                disabled={!!restoreSession && (!restoreSession.verdict.ok || restoreSession.verdict.orphan_parents.length > 0 || restoreSession.verdict.parent_type_mismatches.length > 0)}
                                 onclick={() => void confirmRestore()}
                             >
                                 Confirm restore
