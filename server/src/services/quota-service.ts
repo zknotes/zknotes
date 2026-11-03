@@ -89,6 +89,15 @@ export interface QuotaAccumulator {
 }
 
 /** The four counters plus the quota, read under `FOR UPDATE` — every quota write goes through this lock. */
+/**
+ * Takes the user's row for the counter update. `FOR NO KEY UPDATE`, not `FOR UPDATE`: the counters
+ * are not key columns, and the stronger lock conflicts with the `FOR KEY SHARE` every INSERT of a
+ * row that references the user takes for its foreign-key check (a history snapshot, a session, an
+ * item). With `FOR UPDATE` two requests of one user deadlocked in production: a snapshot insert
+ * waited on the quota lock of an item write, which waited on the item row the insert had already
+ * key-shared. `NO KEY UPDATE` still serialises the quota updates among themselves, which is all this
+ * needs.
+ */
 async function lockUserQuotaRow(tx: DbExecutor, userId: string) {
     const [user] = await tx
         .select({
@@ -101,7 +110,7 @@ async function lockUserQuotaRow(tx: DbExecutor, userId: string) {
         })
         .from(users)
         .where(eq(users.id, userId))
-        .for("update")
+        .for("no key update")
         .limit(1);
     return user;
 }

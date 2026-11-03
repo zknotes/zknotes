@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+### Fixed
+
+- Saving a note's history snapshot could fail with a server error when another request of the
+  same account (an autosave, say) ran at the same moment: the two waited on each other in the
+  database and one was cancelled. The storage counter now takes a lighter lock that an insert
+  referencing the account does not have to wait for.
+
 ## [0.3.0] - 2026-11-03
 
 ### Added
