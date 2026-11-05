@@ -5,6 +5,33 @@ the server stores the ciphertext plus the structural metadata it needs to sync i
 [`SECURITY.md`](SECURITY.md) lists what that metadata is.
 A hosted instance is available at [zknotes.eu](https://zknotes.eu).
 
+![The ZKnotes editor: a note with headings, a checklist and an attached photo, with the vault's folder tree on the left](docs/screenshot.png)
+
+## Self-hosting
+
+On a server with Docker and two DNS names pointing at it — the vault (`notes.example.com`) and its
+file storage (`s3.notes.example.com`):
+
+```bash
+git clone https://github.com/zknotes/zknotes.git
+cd zknotes/docker
+./setup.sh
+```
+
+`setup.sh` asks for the domain, generates the secrets, sets up the built-in file storage, builds and
+starts everything, and tells you to open `https://<domain>/create-vault`. A small VPS with 2 vCPU /
+4 GB RAM is enough for a personal or small-team instance. The manual setup, environment variables,
+using your own S3 provider, TLS, updates and backups are in [`docker/README.md`](docker/README.md).
+
+That is the only supported way to run it in production: the security headers the client relies on
+(Content-Security-Policy, HSTS and the share-page policies) come from the nginx and Caddy
+configuration there, which `bun run preview` and a bare API process do not have.
+
+Support for self-hosting is **best effort**: the deployment files here are the ones actually used in
+production, so they work, but there is no commitment to a response time on self-hosting issues. If
+you modify ZKnotes and let other people use it over a network, see [License](#license) for what
+AGPL-3.0 §13 asks of you.
+
 ## Documentation
 
 - **Running it** (Docker, environment variables, backups, TLS) → [`docker/README.md`](docker/README.md).
@@ -228,18 +255,6 @@ startup (`docker/entrypoint.sh`).
 The Compose project is pinned to `open-core`, so container and volume names stay the same wherever
 the repository is cloned.
 
-## Deployment
-
-On a server with Docker: `git clone`, then `cd zknotes/docker && ./setup.sh` — it asks for the
-domain, generates the secrets, sets up the built-in file storage, builds and starts everything.
-Operational detail — the manual setup, environment variables, TLS, backups — is in
-[`docker/README.md`](docker/README.md). That is
-the only supported way to run it in production: the security headers the client relies on
-(Content-Security-Policy, HSTS and the share-page policies) come from the nginx and Caddy
-configuration there, which `bun run preview` and a bare API process do not have.
-
----
-
 ## License
 
 Copyright (C) 2026 Janko Diminic
@@ -258,6 +273,3 @@ with the licence, from the sign-in page, the account-creation page, every shared
 readers never sign in) and Settings → About. `server/.env.example` sets it to
 `https://github.com/zknotes/zknotes`, which is right for an unmodified instance only. Whether that
 is all §13 asks of your modified version is for you to judge; this is not legal advice.
-
-Support for self-hosting is **best effort**: the deployment files here are the ones actually used in
-production, so they work, but there is no commitment to a response time on self-hosting issues.
