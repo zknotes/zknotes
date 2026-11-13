@@ -61,6 +61,14 @@ export type SerializedIndexBlob =
           ikNonce: Uint8Array;
       };
 
+/** A seal record as stored on the server: encrypted with its seal key, the key wrapped with the VK. */
+export type SealCiphertext = {
+    encryptedRecord: Uint8Array;
+    recordNonce: Uint8Array;
+    encryptedSealKey: Uint8Array;
+    sealKeyNonce: Uint8Array;
+};
+
 type WorkerReply<TPayload = unknown> = { payload: TPayload };
 
 /** Creates the worker port — lifted out so tests can inject a fake port without vi.mock. */
@@ -431,6 +439,67 @@ export class CryptoWorkerClient {
         return fromBytes(res.payload.plaintext);
     }
 
+    async sealHashStart(sessionId: string): Promise<void> {
+        await this.#send("SEAL_HASH_START", { sessionId }, ITEM_RPC_TIMEOUT_MS);
+    }
+
+    /** Decrypts one chunk inside the worker and feeds it to the session's hash; nothing comes back. */
+    async sealHashChunk(args: {
+        sessionId: string;
+        itemId: string;
+        chunkSetId: string;
+        chunkIndex: number;
+        totalChunks: number;
+        ciphertext: Uint8Array;
+        nonce: Uint8Array;
+    }): Promise<void> {
+        const exactCiphertext = args.ciphertext.slice();
+        await this.#send(
+            "SEAL_HASH_CHUNK",
+            { ...args, ciphertext: exactCiphertext.buffer, nonce: toBytes(args.nonce) },
+            30 * SECOND_MS,
+            [exactCiphertext.buffer],
+        );
+    }
+
+    async sealHashFinish(sessionId: string): Promise<{ sha256Hex: string; byteLength: number }> {
+        const res = await this.#send<{ sha256Hex: string; byteLength: number }>(
+            "SEAL_HASH_FINISH",
+            { sessionId },
+            ITEM_RPC_TIMEOUT_MS,
+        );
+        return res.payload;
+    }
+
+    async sealEncryptRecord(sealId: string, record: object): Promise<SealCiphertext> {
+        const res = await this.#send<Record<keyof SealCiphertext, number[]>>(
+            "SEAL_ENCRYPT_RECORD",
+            { sealId, record },
+            ITEM_RPC_TIMEOUT_MS,
+        );
+        return {
+            encryptedRecord: fromBytes(res.payload.encryptedRecord),
+            recordNonce: fromBytes(res.payload.recordNonce),
+            encryptedSealKey: fromBytes(res.payload.encryptedSealKey),
+            sealKeyNonce: fromBytes(res.payload.sealKeyNonce),
+        };
+    }
+
+    async sealDecryptRecord<T>(sealId: string, c: SealCiphertext): Promise<T> {
+        const res = await this.#send<{ record: T }>(
+            "SEAL_DECRYPT_RECORD",
+            {
+                sealId,
+                encryptedRecord: toBytes(c.encryptedRecord),
+                recordNonce: toBytes(c.recordNonce),
+                encryptedSealKey: toBytes(c.encryptedSealKey),
+                sealKeyNonce: toBytes(c.sealKeyNonce),
+            },
+            ITEM_RPC_TIMEOUT_MS,
+        );
+        return res.payload.record;
+    }
+
     async buildIndex(docs: SearchDoc[]): Promise<{ count: number }> {
         const res = await this.#send<{ count: number }>("BUILD_INDEX", { docs }, MINUTE_MS);
         return res.payload;
@@ -772,6 +841,40 @@ export function decryptChunkTask(
         ciphertext,
         nonce,
     );
+}
+
+/** Starts a content hash in the worker for one seal. */
+export function sealHashStartTask(sessionId: string): Promise<void> {
+    return cryptoWorker.sealHashStart(sessionId);
+}
+
+/** Decrypts one file chunk in the worker and adds it to the seal's hash. No plaintext returns. */
+export function sealHashChunkTask(args: {
+    sessionId: string;
+    itemId: string;
+    chunkSetId: string;
+    chunkIndex: number;
+    totalChunks: number;
+    ciphertext: Uint8Array;
+    nonce: Uint8Array;
+}): Promise<void> {
+    return cryptoWorker.sealHashChunk(args);
+}
+
+export function sealHashFinishTask(
+    sessionId: string,
+): Promise<{ sha256Hex: string; byteLength: number }> {
+    return cryptoWorker.sealHashFinish(sessionId);
+}
+
+/** Encrypts a seal record under a fresh seal key wrapped with the Vault Key (both bound to `sealId`). */
+export function sealEncryptRecordTask(sealId: string, record: object): Promise<SealCiphertext> {
+    return cryptoWorker.sealEncryptRecord(sealId, record);
+}
+
+/** `sealId` must be the locally held id the caller expects, never one taken from a server reply. */
+export function sealDecryptRecordTask<T>(sealId: string, c: SealCiphertext): Promise<T> {
+    return cryptoWorker.sealDecryptRecord<T>(sealId, c);
 }
 
 export function buildIndexTask(docs: SearchDoc[]): Promise<{ count: number }> {

@@ -1,0 +1,51 @@
+{
+  "manifest_sha256": "fee9f68187b4f2267bcc723b875da57d8a5ad57aab8108f53280f973706a1269",
+  "nonce": "e883a6dd12c9bb6d3b7036dcbf6c94f3",
+  "commitment": "79668695e5fe189f67f318cdcb5f010f36b2cfd704b4833b5ad1d6daf08decbd",
+  "calendars": {
+    "alice": {
+      "url": "https://alice.btc.calendar.opentimestamps.org",
+      "status": 200,
+      "bytes": 172,
+      "pending": [
+        [
+          "6af78b3d4cc7358837543aefe1cd27299fbfcdb05f983480857a92a41f522f9fcccc8fa704cb8d3e93818ed6",
+          "https://alice.btc.calendar.opentimestamps.org"
+        ]
+      ]
+    },
+    "bob": {
+      "url": "https://bob.btc.calendar.opentimestamps.org",
+      "status": 200,
+      "bytes": 205,
+      "pending": [
+        [
+          "6af78b3e57d71077a7a9d6a5608a38a7e101cc9989e38c127942ed46846f9e8f83ff38d9634e8eee7ce24a73",
+          "https://bob.btc.calendar.opentimestamps.org"
+        ]
+      ]
+    },
+    "finney": {
+      "url": "https://finney.calendar.eternitywall.com",
+      "status": 200,
+      "bytes": 191,
+      "pending": [
+        [
+          "6af78b3f7cfe336c51ecde9c4eaa21638bfe35f589a0d48f49b7e04e5140fdf96ac5dc02123260a60e075e4d",
+          "https://finney.calendar.eternitywall.com"
+        ]
+      ]
+    },
+    "catallaxy": {
+      "url": "https://btc.calendar.catallaxy.com",
+      "status": 200,
+      "bytes": 185,
+      "pending": [
+        [
+          "6af78b41b7bfd7ce42d4630c6122cfa7801ce3228bffc3423c4dbed5432d44cb723871b326d2d06eb310ebca",
+          "https://btc.calendar.catallaxy.com"
+        ]
+      ]
+    }
+  }
+}

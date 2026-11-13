@@ -287,6 +287,15 @@ const itemBytesSql = sql`COALESCE(SUM(
     COALESCE(octet_length(item_key_nonce), 0)
 ), 0)::bigint`;
 
+// The byte size of a seal row's four ciphertext columns — the same arithmetic as
+// `sealStorageSize` in seal-service, applied in the database.
+const sealBytesSql = sql`COALESCE(SUM(
+    COALESCE(octet_length(encrypted_record), 0) +
+    COALESCE(octet_length(record_nonce), 0) +
+    COALESCE(octet_length(encrypted_seal_key), 0) +
+    COALESCE(octet_length(seal_key_nonce), 0)
+), 0)::bigint`;
+
 const sumOf = (rows: Array<Record<string, unknown>>): number => Number(rows[0]?.sum ?? 0);
 
 /**
@@ -297,7 +306,7 @@ const sumOf = (rows: Array<Record<string, unknown>>): number => Number(rows[0]?.
  *
  *  - files:   committed blobs referenced by a live, non-trashed item, plus the bytes reserved by
  *             in-flight uploads and open restore staging (so a reconcile never loses a reservation);
- *  - items:   payload bytes of live, non-trashed items;
+ *  - items:   payload bytes of live, non-trashed items, plus every seal record;
  *  - history: payload bytes of every history snapshot;
  *  - trash:   blobs of trashed files AND the payload bytes of trashed items — a soft delete keeps
  *             the ciphertext, so those bytes stay in a counter (otherwise this repair would "fix"
@@ -344,6 +353,11 @@ export async function recomputeUserQuota(
           AND purged_at IS NULL
           AND encrypted_payload IS NOT NULL
     `);
+    const sealRecords = await exec.execute(sql`
+        SELECT ${sealBytesSql} as sum
+        FROM seals
+        WHERE user_id = ${userId}
+    `);
     const history = await exec.execute(sql`
         SELECT ${itemBytesSql} as sum
         FROM item_history
@@ -373,7 +387,7 @@ export async function recomputeUserQuota(
 
     const result: RecomputedQuota = {
         files: sumOf([...liveBlobs]) + sumOf([...uploads]) + sumOf([...restoreSets]),
-        items: sumOf([...liveItems]),
+        items: sumOf([...liveItems]) + sumOf([...sealRecords]),
         history: sumOf([...history]),
         trash: sumOf([...trashedBlobs]) + sumOf([...trashedItems]),
     };

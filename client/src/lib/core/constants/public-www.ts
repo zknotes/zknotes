@@ -16,6 +16,8 @@ export type InstancePublicConfig = {
     account?: { manageUrl?: string };
     /** Days an item stays in Trash before the server purges it (the instance's TRASH_RETENTION_DAYS). */
     trashRetentionDays?: number;
+    /** The instance has OpenTimestamps calendars, so files can be sealed. Absent = no "Seal" action. */
+    sealsEnabled?: true;
 };
 
 let cached: InstancePublicConfig | null = null;
@@ -61,6 +63,7 @@ function parseConfig(raw: unknown): InstancePublicConfig {
         ...(verifyUrl ? { verifyUrl } : {}),
         ...(manageUrl ? { account: { manageUrl } } : {}),
         ...(trashRetentionDays ? { trashRetentionDays } : {}),
+        ...(obj.sealsEnabled === true ? { sealsEnabled: true as const } : {}),
     };
 }
 

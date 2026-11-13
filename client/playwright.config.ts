@@ -1,5 +1,10 @@
 import { defineConfig, devices } from "@playwright/test";
-import { apiWebServer, E2E_WEB_PORT, resolveChromePath } from "./playwright.shared";
+import {
+    apiWebServer,
+    E2E_WEB_PORT,
+    fakeOtsCalendarWebServer,
+    resolveChromePath,
+} from "./playwright.shared";
 
 const API_PORT = 3001;
 const WEB_PORT = E2E_WEB_PORT;
@@ -76,6 +81,7 @@ export default defineConfig({
     ],
     globalSetup: "./e2e/global-setup.ts",
     webServer: [
+        fakeOtsCalendarWebServer(),
         // The GC, Argon2 and KDF environment is explained in playwright.shared.ts.
         apiWebServer(API_PORT, [
             `http://localhost:${WEB_PORT}`,

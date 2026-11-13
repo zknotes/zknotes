@@ -104,6 +104,7 @@ export default defineConfig({
             "/uploads": "http://127.0.0.1:3000",
             "/me": "http://127.0.0.1:3000",
             "/shares": "http://127.0.0.1:3000",
+            "/seals": "http://127.0.0.1:3000",
             "/instance-config": "http://127.0.0.1:3000",
             "/client-error": "http://127.0.0.1:3000",
             "/client-log": "http://127.0.0.1:3000",

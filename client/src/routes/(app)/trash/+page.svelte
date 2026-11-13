@@ -47,6 +47,7 @@ import {
     trashRetentionLabel,
 } from "$lib/core/utils/format";
 import { loadInstancePublicConfig } from "$lib/core/constants/public-www";
+import { filePanelExtensions } from "$lib/core/events/file-panel-extensions";
 import { effectiveTrashedBytes, localTrashedFileBytes } from "$lib/core/utils/storage-display";
 import FileThumb from "$lib/modules/files/FileThumb.svelte";
 import { FileService } from "$lib/modules/files/file-service";
@@ -75,6 +76,43 @@ let confirmDialog = $state<
     | null
 >(null);
 let deleting = $state(false);
+
+// What a permanent delete would end besides the items themselves (a file's seals, say), from the
+// modules registered on the file-panel extension point. Asked while the confirmation is open.
+let deleteWarnings = $state<string[]>([]);
+$effect(() => {
+    const d = confirmDialog;
+    deleteWarnings = [];
+    if (!d) return;
+    const all = allDeleted;
+    const targets =
+        d.kind === "one"
+            ? [d.item]
+            : d.kind === "bulk"
+              ? all.filter((i) => d.ids.includes(i.id))
+              : all;
+    const batches = new Set(targets.map((t) => t.trashed_batch_id).filter((b) => b != null));
+    const fileIds = all
+        .filter(
+            (i) =>
+                i.type === "file" &&
+                (targets.includes(i) ||
+                    (i.trashed_batch_id != null && batches.has(i.trashed_batch_id))),
+        )
+        .map((i) => i.id);
+    if (fileIds.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+        const messages = new Set<string>();
+        for (const id of fileIds) {
+            for (const m of await filePanelExtensions.contentWarnings(id)) messages.add(m);
+        }
+        if (!cancelled) deleteWarnings = [...messages];
+    })();
+    return () => {
+        cancelled = true;
+    };
+});
 
 let storage = $state<StorageInfo | "loading" | "error">("loading");
 let trashSize = $state(0);
@@ -558,6 +596,9 @@ async function confirmDestructiveAction() {
                     This permanently deletes all {allDeleted.length} items in trash and cannot be undone.
                 {/if}
             </p>
+            {#each deleteWarnings as warning}
+                <p class="text-xs text-[var(--text-muted)] mb-3" data-testid="delete-content-warning">{warning}</p>
+            {/each}
         {/snippet}
         {#snippet footer()}
             <DialogActions>

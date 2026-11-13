@@ -166,6 +166,40 @@ export function buildShareWrapAad(shareId: string, itemId: string): Uint8Array {
 }
 
 /**
+ * An incremental SHA-256, for the crypto worker: a seal hashes a file's plaintext chunk by chunk as
+ * it decrypts it, so neither the whole file nor any plaintext chunk has to leave the worker.
+ */
+export function createSha256Hasher(): {
+    update(chunk: Uint8Array): void;
+    digest(): Uint8Array;
+} {
+    const h = sha256.create();
+    return {
+        update: (chunk) => {
+            h.update(chunk);
+        },
+        digest: () => h.digest(),
+    };
+}
+
+/**
+ * AAD for a seal key wrapped with the Vault Key. Each seal has its own random 32-byte key; the prefix
+ * keeps this wrap apart from an item key wrap (whose AAD is the bare item id), and the seal id binds
+ * the wrap to its row so the server cannot move it to another seal.
+ */
+export function buildSealKeyWrapAad(sealId: string): Uint8Array {
+    return new TextEncoder().encode(`zknotes-seal-key-v1|${sealId}`);
+}
+
+/**
+ * AAD for a seal record encrypted with its seal key. It never shares a (key, AAD) pair with a file's
+ * payload: different key, different prefix. The caller passes the locally held seal id.
+ */
+export function buildSealRecordAad(sealId: string): Uint8Array {
+    return new TextEncoder().encode(`zknotes-seal-record-v1|${sealId}`);
+}
+
+/**
  * Proof of possession of the fragment link key for POST /shares/:id/view (anti-burn without the key).
  * The server stores only the SHA-256 hash of this proof; the link key itself never goes on the wire.
  */

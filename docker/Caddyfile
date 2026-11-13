@@ -23,7 +23,7 @@
     # (a new API prefix ⇒ update both files + API_PREFIXES in client/src/service-worker.ts).
     # /client-log and /dev-* are dev-only routes and are deliberately NOT routed (a smaller attack
     # surface).
-    @api path /auth /auth/* /vault /items /items/* /restore /restore/* /uploads /uploads/* /me /me/* /shares /shares/* /instance-config /client-error /health
+    @api path /auth /auth/* /vault /items /items/* /restore /restore/* /uploads /uploads/* /me /me/* /shares /shares/* /seals /seals/* /instance-config /client-error /health
 
     handle @api {
         # Strip any doubled slashes before proxying.

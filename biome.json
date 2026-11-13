@@ -32,7 +32,8 @@
             "!**/node_modules",
             "!**/build",
             "!**/.DS_Store",
-            "!**/drizzle"
+            "!**/drizzle",
+            "!**/__fixtures__"
         ]
     },
     "css": {

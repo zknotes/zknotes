@@ -33,6 +33,7 @@ import { releaseRestoreStaging } from "./services/restore-service";
 import { S3_BUCKET, s3 } from "./s3";
 import { purgeOwnedItem } from "./services/item-service";
 import { purgeStaleSignInFailures } from "./services/login-throttle";
+import { deleteSealsOfChunkSet } from "./services/seal-service";
 import { purgeStaleShareFailures } from "./services/share-gate";
 import {
     chunkSetPrefix,
@@ -278,6 +279,21 @@ export async function runGc(opts: GcOptions = {}): Promise<GcResult> {
             // The condition is checked again on the row itself: between the scan above and this
             // statement a conflict copy can take the set back (reclaimChunkSetFromPendingDelete
             // clears pending_delete_at), and deleting it then would delete a live file.
+            const [still] = await tx
+                .select({ id: chunkSets.id })
+                .from(chunkSets)
+                .where(
+                    and(
+                        eq(chunkSets.id, cs.id),
+                        isNotNull(chunkSets.pending_delete_at),
+                        lte(chunkSets.pending_delete_at, now - blobPurgeGrace),
+                    ),
+                )
+                .for("update")
+                .limit(1);
+            if (!still) return false;
+            // A seal vouches for these exact bytes; it goes with them, and its quota with it.
+            await deleteSealsOfChunkSet(tx, cs.id);
             const [gone] = await tx
                 .delete(chunkSets)
                 .where(
@@ -676,6 +692,7 @@ export async function runDeepRepair(opts: DeepRepairOptions = {}): Promise<DeepR
                 }
                 await db.transaction(async (tx) => {
                     await tx.delete(fileChunks).where(eq(fileChunks.chunk_set_id, cs.id));
+                    await deleteSealsOfChunkSet(tx, cs.id);
                     await tx.delete(chunkSets).where(eq(chunkSets.id, cs.id));
                     // The same truth as section C: no bytes → the session may not say `committed`.
                     await markUploadSessionPurged(tx, cs.id, now);

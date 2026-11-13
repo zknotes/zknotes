@@ -1,0 +1,2 @@
+ZKnotes seal fixture.
+This file exists only to be sealed once against the live OpenTimestamps calendars.

@@ -23,6 +23,11 @@ export type Entitlements = {
     /** The plan's name, for display; `null` on a self-host — the UI row is then not rendered. */
     readonly planLabel: string | null;
     readonly isPaid: boolean;
+    /**
+     * Proof-of-existence seals a user may create in any 24 hours; 0 turns sealing off for them.
+     * Optional: a provider without an opinion leaves it out and the core's `SEALS_PER_DAY` applies.
+     */
+    readonly sealsPerDay?: number;
 };
 
 /** The quota a freshly created user gets. Kept apart from `Entitlements` because it is written into the `users` row. */
@@ -53,6 +58,16 @@ export type EntitlementsProvider = {
     /** Immediately after the user is inserted, **in the same transaction** — it may write a plan. */
     onUserCreatedInTx?(tx: EntitlementsDb, userId: string, email: string): Promise<void>;
 };
+
+/**
+ * The core's daily seal allowance: `SEALS_PER_DAY`, a whole number ≥ 0, default 20. Unlike the
+ * other limits, 0 is meaningful here (sealing off for every user) and is kept.
+ */
+export function defaultSealsPerDay(): number {
+    const raw = process.env.SEALS_PER_DAY;
+    const parsed = raw === undefined || raw.trim() === "" ? Number.NaN : Number(raw);
+    return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : 20;
+}
 
 /** Fallback for a provider with no opinion on registration at all — then nothing is closed. */
 export const OPEN_REGISTRATION: RegistrationStatus = { open: true };
@@ -93,6 +108,7 @@ export const permissiveEntitlementsProvider: EntitlementsProvider = {
             planLabel: null,
             // There is no billing, so there is no "free" restriction either: everything there is, is allowed.
             isPaid: true,
+            sealsPerDay: defaultSealsPerDay(),
         };
     },
     quotaForNewUser() {
