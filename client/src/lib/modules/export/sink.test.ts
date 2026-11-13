@@ -1,7 +1,8 @@
 import { strFromU8, strToU8, unzipSync } from "fflate";
 import { describe, expect, it } from "vitest";
 import { BackupEncryptor, decryptBackup, isEncryptedBackup } from "./backup-crypto";
-import { createMemorySink, encryptedSink, ZipStreamWriter } from "./sink";
+import { ZipStreamWriter } from "$lib/core/utils/zip-stream";
+import { createMemorySink, encryptedSink } from "./sink";
 
 function memorySink() {
     return createMemorySink();
