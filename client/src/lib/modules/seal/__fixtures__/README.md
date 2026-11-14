@@ -12,9 +12,14 @@ directory: every file is compared byte for byte.
 | `calendar-<name>.pending.bin` | The raw body of `POST <calendar>/digest` with `commitment` as the body: a bare timestamp rooted at the commitment. |
 | `reference-merged.pending.ots` | The detached proof `digest → append(nonce) → sha256 → (all four replies merged)`, built and serialized with the reference Python library (`opentimestamps` 0.4.x, used as a test-vector generator only, never as a dependency). |
 | `official.pending.ots` | `ots stamp manifest.json` from the official client v0.8.0 against the same four calendars. It uses the client's own nonce, so it is a separate tree from the capture above. |
+| `calendar-<name>.upgrade.bin` | The raw body of `GET <calendar>/timestamp/<pending message>` once it returned 200: a bare timestamp rooted at that calendar's pending message, ending in a Bitcoin block attestation. |
+| `reference-merged.confirmed.ots` | `reference-merged.pending.ots` with all four upgrades merged in, by the reference library. Blocks 975723 (alice, bob), 975735 (catallaxy), 975749 (finney). |
+| `official.confirmed.ots` | `official.pending.ots` after `ots upgrade`; the client stops at the first complete path (block 975723). |
 
-Confirmed versions (`*.upgrade.bin`, `*.confirmed.ots`) are added once the calendars have committed
-the stamps to Bitcoin.
+The confirmed proof was checked outside this code on 2026-11-14: `sha256sum sealed-file.txt` equals
+`content_sha256`, and `ots --no-bitcoin verify manifest.json.ots` names a Merkle root for each block
+that matches the root a public block explorer shows for it. Block 975723 was mined 53 minutes after
+the seal; the last calendar's block came about 7.5 hours after it.
 
 ## How they were made
 

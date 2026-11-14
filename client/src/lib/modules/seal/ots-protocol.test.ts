@@ -152,6 +152,63 @@ describe("malformed input", () => {
     });
 });
 
+describe("confirmed proofs (the calendars' answers once the stamp reached a block)", () => {
+    /**
+     * The Merkle roots of the blocks the fixture reached, as a public block explorer shows them
+     * (checked by hand when the fixtures were captured). The attestation's message is the root in
+     * the block header's internal byte order, which is the reverse of how explorers print it.
+     */
+    const BLOCK_ROOTS: Record<number, string> = {
+        975_723: "1065c893e473b750ba9025f9b521464f7a45cfc3496f83416d7382a636f5ef61",
+        975_735: "556a65b1425a60a76b0947234fa0eae6ec16a475e5a7bd83edc45359f633db67",
+        975_749: "76109e3749fdf60f1ffe7832fe83e61c87b3117e69cc7d928931b519e34c3d0a",
+    };
+
+    it("AC2: the official client's upgraded proof re-serializes byte for byte", async () => {
+        const bytes = fixture("official.confirmed.ots");
+        const proof = await parseDetached(bytes);
+        expect(toHex(serializeDetached(proof))).toBe(toHex(bytes));
+        expect(bitcoinHeights(proof.timestamp)).toEqual([975_723]);
+    });
+
+    it.each(CALENDARS)(
+        "%s: the completed reply parses at its pending message and round-trips",
+        async (name) => {
+            const [message] = capture.calendars[name]?.pending[0] ?? [];
+            const bytes = fixture(`calendar-${name}.upgrade.bin`);
+            const t = await parseTimestamp(bytes, fromHex(message as string));
+            expect(toHex(serializeTimestamp(t))).toBe(toHex(bytes));
+            expect(bitcoinHeights(t).length).toBe(1);
+        },
+    );
+
+    it("AC2: pending replies plus every upgrade merge into the reference implementation's bytes", async () => {
+        const { root, commitment } = await createSealTree(
+            fromHex(capture.manifest_sha256),
+            fromHex(capture.nonce),
+        );
+        for (const name of CALENDARS) {
+            await mergeAt(root, commitment.msg, fixture(`calendar-${name}.pending.bin`));
+        }
+        // The client asks with the pending message the proof itself names, never a stored one.
+        for (const { uri, msg } of pendingAttestations(root)) {
+            const name = CALENDARS.find((c) => capture.calendars[c]?.url === uri) as string;
+            await mergeAt(root, msg, fixture(`calendar-${name}.upgrade.bin`));
+        }
+        const merged = serializeDetached({ hashOp: OP.sha256, timestamp: root });
+        expect(toHex(merged)).toBe(toHex(fixture("reference-merged.confirmed.ots")));
+        expect(bitcoinHeights(root)).toEqual([975_723, 975_735, 975_749]);
+    });
+
+    it("every Bitcoin attestation's message is that block's Merkle root", async () => {
+        const proof = await parseDetached(fixture("reference-merged.confirmed.ots"));
+        for (const { msg, attestation } of proof.timestamp.allAttestations()) {
+            if (attestation.kind !== "bitcoin") continue;
+            expect(toHex(msg.slice().reverse())).toBe(BLOCK_ROOTS[attestation.height]);
+        }
+    });
+});
+
 describe("tree basics", () => {
     it("a Bitcoin attestation with a multi-byte height round-trips", async () => {
         const t = new Timestamp(new Uint8Array(32));
