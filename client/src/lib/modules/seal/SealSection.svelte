@@ -11,6 +11,7 @@ import SealBadge from "./SealBadge.svelte";
 import SealDialog from "./SealDialog.svelte";
 import {
     chunkSetOfFile,
+    existedBefore,
     loadSeals,
     type SealView,
     sealsForChunkSet,
@@ -66,7 +67,7 @@ async function refresh(fileId: string, isCurrent: () => boolean) {
         accountHasSeals = overview.seals.length > 0;
         seals = chunkSetId ? sealsForChunkSet(overview.seals, chunkSetId) : [];
         loaded = true;
-        if (seals.some((s) => s.state === "pending")) {
+        if (seals.some((s) => s.state === "pending" || !s.record.block_time)) {
             const upgraded = await upgradePendingSeals(seals);
             if (isCurrent()) seals = upgraded;
         }
@@ -138,6 +139,7 @@ async function onExport() {
             <ul class="space-y-2 mb-3">
                 {#each seals as s (s.id)}
                     {@const st = stateOf(s)}
+                    {@const before = st === "confirmed" ? existedBefore(s.record) : null}
                     <li class="rounded-lg border border-[var(--stroke)] px-3 py-2 text-xs" data-testid="seal-row">
                         <div class="flex items-center justify-between gap-2">
                             <SealBadge state={st} />
@@ -157,11 +159,22 @@ async function onExport() {
                             {/if}
                         </div>
                         <p class="mt-1.5 text-[var(--text-sub)]">
-                            {#if st === "confirmed" && s.record.confirmed_at}
-                                Existed before {formatDate(isoSeconds(s.record.confirmed_at))}
+                            {#if before?.source === "block"}
+                                <span
+                                    title="When block {before.height.toLocaleString('en-US')} was mined, by its own header, checked on this device"
+                                    data-testid="seal-existed-before"
+                                    data-source="block"
+                                >
+                                    Existed before {formatDate(isoSeconds(before.iso))}
+                                </span>
+                            {:else if before}
+                                <span data-testid="seal-existed-before" data-source="confirmation">
+                                    Existed before {formatDate(isoSeconds(before.iso))}, when this
+                                    device saw the confirmation. The exact time is not checked yet.
+                                </span>
                             {:else if st === "pending"}
                                 Sealed {formatDate(isoSeconds(s.manifest.sealed_at))}. Waiting for
-                                confirmation, usually one to six hours.
+                                confirmation, usually within a few hours.
                             {:else}
                                 Sealed {formatDate(isoSeconds(s.manifest.sealed_at))}, but never
                                 confirmed. Seal the file again.

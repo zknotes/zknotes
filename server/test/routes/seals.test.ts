@@ -9,6 +9,7 @@ import { uuidv7 } from "uuidv7";
 import { buildApp } from "../../src/app";
 import { chunkSets, seals, users } from "../../src/db/schema";
 import { runGc } from "../../src/gc";
+import { __clearBlockHeaderCache } from "../../src/services/block-source";
 import { nowSec } from "../../src/lib/time";
 import { recomputeUserQuota } from "../../src/services/quota-service";
 import { createSeededFileItem, createTestUser, db, resetDb } from "../helpers";
@@ -213,7 +214,7 @@ describe("POST /seals", () => {
     test("AC8: an empty calendar list turns sealing off without an error elsewhere", async () => {
         process.env.OTS_CALENDAR_URLS = "";
         const res = await createSeal(await fileChunkSet());
-        expect(res.statusCode).toBe(403);
+        expect(res.statusCode).toBe(409);
         expect(res.json().error).toBe("seals_disabled");
         const cfg = await app.inject({ method: "GET", url: "/instance-config" });
         expect(cfg.statusCode).toBe(200);
@@ -354,6 +355,64 @@ describe("GET and DELETE", () => {
     });
 });
 
+describe("GET /seals/blocks/:height", () => {
+    const HEADER = readFileSync(`${FIXTURES}/block-975723.header.hex`, "utf8").trim();
+    const HASH = "00".repeat(32);
+    let explorer: { url: string; seen: string[]; stop: () => void };
+
+    beforeAll(() => {
+        const seen: string[] = [];
+        const server = Bun.serve({
+            port: 0,
+            fetch(req) {
+                const path = new URL(req.url).pathname;
+                seen.push(path);
+                if (path === "/block-height/975723") return new Response(HASH);
+                if (path === `/block/${HASH}/header`) return new Response(HEADER);
+                return new Response("not found", { status: 404 });
+            },
+        });
+        explorer = { url: `http://127.0.0.1:${server.port}`, seen, stop: () => server.stop(true) };
+    });
+    afterAll(() => explorer.stop());
+    beforeEach(() => {
+        __clearBlockHeaderCache();
+        explorer.seen.length = 0;
+        process.env.OTS_BLOCK_SOURCE_URL = explorer.url;
+    });
+    afterEach(() => {
+        if (envBefore.OTS_BLOCK_SOURCE_URL === undefined) delete process.env.OTS_BLOCK_SOURCE_URL;
+        else process.env.OTS_BLOCK_SOURCE_URL = envBefore.OTS_BLOCK_SOURCE_URL;
+    });
+
+    const get = (height: string, as = cookie) =>
+        app.inject({ method: "GET", url: `/seals/blocks/${height}`, headers: { cookie: as } });
+
+    test("relays the header and serves it from cache the second time", async () => {
+        const res = await get("975723");
+        expect(res.statusCode).toBe(200);
+        expect(res.json()).toEqual({ height: 975723, header: HEADER });
+        await get("975723");
+        expect(explorer.seen).toEqual(["/block-height/975723", `/block/${HASH}/header`]);
+    });
+
+    test("without a session → 401; a bad height → 400; an unknown block → 502", async () => {
+        expect((await app.inject({ method: "GET", url: "/seals/blocks/1" })).statusCode).toBe(401);
+        expect((await get("-1")).statusCode).toBe(400);
+        expect((await get("1e3")).statusCode).toBe(400);
+        expect((await get("99999999999")).statusCode).toBe(400);
+        expect((await get("1")).statusCode).toBe(502);
+    });
+
+    test("an empty OTS_BLOCK_SOURCE_URL turns it off", async () => {
+        process.env.OTS_BLOCK_SOURCE_URL = "";
+        const res = await get("975723");
+        expect(res.statusCode).toBe(409);
+        expect(res.json().error).toBe("block_source_disabled");
+        expect(explorer.seen).toEqual([]);
+    });
+});
+
 describe("AC9: the commitment is never stored or logged", () => {
     const src = (rel: string) => readFileSync(resolve(import.meta.dir, "../../src", rel), "utf8");
 
@@ -367,10 +426,17 @@ describe("AC9: the commitment is never stored or logged", () => {
             "routes/seals.ts",
             "services/ots-calendar.ts",
             "services/seal-service.ts",
+            "services/block-source.ts",
         ]) {
             expect(src(file)).not.toMatch(/\b(log|logger)\.(trace|debug|info|warn|error|fatal)\(/);
             expect(src(file)).not.toMatch(/console\./);
         }
+    });
+
+    // The client treats any 403 outside /auth as a locked account and signs the user out, so a
+    // seal route must never use it for "off" or "not allowed".
+    test("no seal route answers 403", () => {
+        expect(src("routes/seals.ts")).not.toMatch(/status\(403\)/);
     });
 });
 

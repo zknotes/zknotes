@@ -8,7 +8,7 @@
 // Uniform row heights make the arithmetic trivial: every grid cell is GRID_CARD_H tall (with a
 // GRID_GAP gap) and every list row is LIST_ROW_H tall. No per-item measurement is needed.
 
-import { FolderClosed, Shield, Cloud, CloudDownload, MoreHorizontal } from "lucide-svelte";
+import { FolderClosed, Shield, Cloud, CloudDownload, MoreHorizontal, Stamp } from "lucide-svelte";
 import type { DecryptedItemMeta } from "$lib/core/data/items";
 import { fileIcon, humanSize, relativeTime } from "$lib/core/utils/format";
 import { pinManager } from "$lib/core/files/pin-manager-state.svelte";
@@ -27,8 +27,13 @@ interface Props {
     onSelect: (f: DecryptedItemMeta) => void;
     selectedIds: Set<string>;
     onToggle: (id: string) => void;
+    /**
+     * Optional per-file markers from another feature (the page passes the seal states), so this
+     * module shows them without importing that feature. `done` = finished, otherwise in progress.
+     */
+    markers?: ReadonlyMap<string, { label: string; done: boolean }>;
 }
-const { files, mode, onSelect, selectedIds, onToggle }: Props = $props();
+const { files, mode, onSelect, selectedIds, onToggle, markers }: Props = $props();
 
 const GRID_CARD_H = 144;
 const GRID_GAP = 12;
@@ -182,6 +187,7 @@ const visible = $derived(files.slice(startRow * cols, endRow * cols));
                                     <MetaText as="div" class="mt-auto pt-3 border-t border-[var(--stroke)] flex items-center justify-between gap-1 font-mono min-w-0">
                                         <span class="truncate">{humanSize(f.size)}</span>
                                         <FilePresenceBadge fileId={f.id} />
+                                        {@render marker(f.id)}
                                         <span class="truncate shrink-0">{relativeTime(f.updated_at)}</span>
                                     </MetaText>
                                 </div>
@@ -245,6 +251,7 @@ const visible = $derived(files.slice(startRow * cols, endRow * cols));
                                     <MetaText as="div" class="font-mono flex items-center gap-3 flex-shrink-0">
                                         <span class="tabular-nums w-16 text-right">{humanSize(f.size)}</span>
                                         <FilePresenceBadge fileId={f.id} />
+                                        {@render marker(f.id)}
                                         <span class="w-14 text-right">{relativeTime(f.updated_at)}</span>
                                         <span class="text-brand-fg/70"><Shield class="w-[0.6875rem] h-[0.6875rem]" /></span>
                                     </MetaText>
@@ -286,3 +293,18 @@ const visible = $derived(files.slice(startRow * cols, endRow * cols));
         {/if}
     </div>
 {/if}
+
+{#snippet marker(id: string)}
+    {@const m = markers?.get(id)}
+    {#if m}
+        <span
+            class="shrink-0 {m.done ? 'text-brand-fg' : 'text-[var(--text-dim)]'}"
+            title={m.label}
+            aria-label={m.label}
+            data-testid="file-marker"
+            data-done={m.done}
+        >
+            <Stamp class="w-[0.6875rem] h-[0.6875rem]" />
+        </span>
+    {/if}
+{/snippet}

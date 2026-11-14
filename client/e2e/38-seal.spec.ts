@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { E2E_OTS_CALENDAR_URL } from "../playwright.shared";
 import { setupAuthenticatedUser } from "./helpers/auth-helper";
-import { closeFilePanel, openFileDetailPanel, uploadDocToFiles } from "./helpers/files";
+import { closeFilePanel, fileCard, openFileDetailPanel, uploadDocToFiles } from "./helpers/files";
 
 /**
  * Proof of existence, end to end: seal → pending → confirmed → certificate export, against the local
@@ -51,10 +51,18 @@ test.describe("Seal — proof of existence", () => {
         // The calendar commits; reopening the panel checks pending seals.
         await request.post(`${E2E_OTS_CALENDAR_URL}/__confirm`);
         await closeFilePanel(page);
+        // The list marks the sealed file once the panel closes (still pending at this point).
+        const marker = fileCard(page, name).getByTestId("file-marker");
+        await expect(marker).toHaveAttribute("data-done", "false");
         await openFileDetailPanel(page, name);
         await expect(section.getByTestId("seal-badge")).toHaveAttribute("data-state", "confirmed", {
             timeout: 30_000,
         });
+        // No block source in E2E: the confirmation time stands in, and says so.
+        await expect(section.getByTestId("seal-existed-before")).toHaveAttribute(
+            "data-source",
+            "confirmation",
+        );
 
         await section.getByTestId("seal-export").click();
         const downloadPromise = page.waitForEvent("download");

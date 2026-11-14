@@ -7,7 +7,15 @@
  * server to the calendars) and the encrypted seal record. The file, its hash, the manifest and the
  * nonce stay here; the plaintext of the file never leaves the crypto worker.
  */
-import { ApiError, createSeal, deleteSeal, listSeals, putSeal, upgradeSeal } from "$lib/core/api";
+import {
+    ApiError,
+    createSeal,
+    deleteSeal,
+    getSealBlock,
+    listSeals,
+    putSeal,
+    upgradeSeal,
+} from "$lib/core/api";
 import type { SealWire } from "@zknotes/shared";
 import { getDB } from "$lib/core/db";
 import { loadChunk } from "$lib/core/files/chunk-loader";
@@ -54,7 +62,26 @@ export type SealRecord = {
     proof: string;
     /** When this device first saw the proof reach a block (its own clock); absent while pending. */
     confirmed_at?: string;
+    /**
+     * When the earliest block the proof reaches was mined, from a header this device checked
+     * (`block-header.ts`). The tighter "existed before"; absent until a header has passed.
+     */
+    block_time?: string;
+    block_height?: number;
 };
+
+/** The best "existed before" this device can state for a confirmed seal, and where it came from. */
+export function existedBefore(
+    record: SealRecord,
+):
+    | { iso: string; source: "block"; height: number }
+    | { iso: string; source: "confirmation" }
+    | null {
+    if (record.block_time && record.block_height !== undefined) {
+        return { iso: record.block_time, source: "block", height: record.block_height };
+    }
+    return record.confirmed_at ? { iso: record.confirmed_at, source: "confirmation" } : null;
+}
 
 export type SealView = {
     id: string;
@@ -328,6 +355,30 @@ export async function sealCountOfFile(itemId: string): Promise<number> {
     return sealsForChunkSet(seals, chunkSetId).length;
 }
 
+/**
+ * A marker per file whose current content is sealed: done once any seal of it is confirmed,
+ * otherwise in progress. Files are matched by the chunk set id from their encrypted payload.
+ */
+export async function sealMarkers(
+    files: ReadonlyArray<{ id: string; chunkSetId?: string }>,
+): Promise<Map<string, { label: string; done: boolean }>> {
+    const { seals } = await loadSeals();
+    const byChunkSet = new Map<string, boolean>();
+    for (const s of seals) {
+        const done = s.state === "confirmed";
+        byChunkSet.set(
+            s.record.chunk_set_id,
+            (byChunkSet.get(s.record.chunk_set_id) ?? false) || done,
+        );
+    }
+    const out = new Map<string, { label: string; done: boolean }>();
+    for (const f of files) {
+        const done = f.chunkSetId ? byChunkSet.get(f.chunkSetId) : undefined;
+        if (done !== undefined) out.set(f.id, { label: done ? "Sealed" : "Seal pending", done });
+    }
+    return out;
+}
+
 /** The seals of one chunk set, by the chunk set id inside each record (never the server's column). */
 export function sealsForChunkSet(all: readonly SealView[], chunkSetId: string): SealView[] {
     return all.filter((s) => s.record.chunk_set_id === chunkSetId);
@@ -363,15 +414,67 @@ export async function upgradeOne(view: SealView): Promise<SealView> {
         confirmed_at: new Date().toISOString(),
     };
     await storeRecord(view.id, "confirmed", record);
-    return { ...view, state: "confirmed", record, blocks };
+    const confirmed: SealView = { ...view, state: "confirmed", record, blocks };
+    try {
+        return await resolveBlockTime(confirmed);
+    } catch {
+        return confirmed;
+    }
 }
 
-/** Upgrades every pending seal; a failure of one does not stop the rest. */
+/**
+ * Fills in when the anchoring block was mined: the header of each block the proof reaches is
+ * fetched through the server and checked here (proof of work at mainnet-scale difficulty, Merkle
+ * root equal to the proof's own message) before its time is believed. The earliest checked block
+ * wins. Without a block source, or with no header that passes, the view is returned unchanged and
+ * the confirmation time stands in.
+ */
+export async function resolveBlockTime(view: SealView): Promise<SealView> {
+    if (view.state !== "confirmed" || view.record.block_time) return view;
+    const proof = await parseDetached(fromBase64(view.record.proof));
+    const { checkBlockHeader } = await import("./block-header");
+    const headers = new Map<number, Promise<string | null>>();
+    let best: { time: number; height: number } | null = null;
+    for (const { msg, attestation } of proof.timestamp.allAttestations()) {
+        if (attestation.kind !== "bitcoin") continue;
+        const h = attestation.height;
+        if (!headers.has(h)) {
+            headers.set(
+                h,
+                getSealBlock(h).then(
+                    (r) => (r.height === h ? r.header : null),
+                    () => null,
+                ),
+            );
+        }
+        const header = await headers.get(h);
+        if (!header) continue;
+        try {
+            const time = await checkBlockHeader(header, msg);
+            if (!best || time < best.time) best = { time, height: h };
+        } catch {
+            // A header that does not check out is ignored, never shown.
+        }
+    }
+    if (!best) return view;
+    const record: SealRecord = {
+        ...view.record,
+        block_time: new Date(best.time * 1000).toISOString(),
+        block_height: best.height,
+    };
+    await storeRecord(view.id, "confirmed", record);
+    return { ...view, record };
+}
+
+/**
+ * Upgrades every pending seal, and fills in the block time of confirmed ones that lack it; a
+ * failure of one does not stop the rest.
+ */
 export async function upgradePendingSeals(views: readonly SealView[]): Promise<SealView[]> {
     const out: SealView[] = [];
     for (const v of views) {
         try {
-            out.push(await upgradeOne(v));
+            out.push(v.state === "pending" ? await upgradeOne(v) : await resolveBlockTime(v));
         } catch {
             out.push(v);
         }

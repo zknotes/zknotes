@@ -22,6 +22,8 @@ const server = vi.hoisted(() => ({
     confirmUpgrades: false,
     upgradeReply: null as null | ((message: string) => string),
     pendingReply: "" as string,
+    /** What the block source answers, by height; empty = the source is off. */
+    blockHeaders: new Map<number, string>(),
 }));
 
 vi.mock("$lib/core/api", async (importOriginal) => {
@@ -80,6 +82,13 @@ vi.mock("$lib/core/api", async (importOriginal) => {
                 ),
             }),
         ),
+        getSealBlock: vi.fn(async (height: number) => {
+            const header = server.blockHeaders.get(height);
+            if (!header) {
+                throw new actual.ApiError("Conflict", 409, { error: "block_source_disabled" });
+            }
+            return { height, header };
+        }),
         deleteSeal: vi.fn(async (id: string) => {
             server.rows.delete(id);
         }),
@@ -122,7 +131,16 @@ import {
     toHex,
 } from "./ots-protocol";
 import { writeCertificateArchive } from "./seal-export";
-import { loadSeals, SealError, sealFile, sealsForChunkSet, upgradeOne } from "./seal-service";
+import {
+    loadSeals,
+    resolveBlockTime,
+    SealError,
+    type SealView,
+    sealFile,
+    sealsForChunkSet,
+    upgradeOne,
+} from "./seal-service";
+import { decodeManifest } from "./manifest";
 
 const vaultKey = new Uint8Array(32).fill(9);
 const FILE_ID = "0192f0d0-0000-7000-8000-0000000000f1";
@@ -206,6 +224,7 @@ beforeEach(async () => {
     server.commitments = [];
     server.calendarsDown = false;
     server.confirmUpgrades = false;
+    server.blockHeaders.clear();
     await unlockWorker(vaultKey.slice());
     await seedFile();
 });
@@ -328,4 +347,72 @@ describe("upgrade and export", () => {
         expect(verify).toContain(manifest.content_sha256);
         expect(verify).toContain("ots verify manifest.json.ots");
     }, 30_000);
+});
+
+describe("block time", () => {
+    const fixtureText = (name: string) =>
+        readFileSync(new URL(`./__fixtures__/${name}`, import.meta.url))
+            .toString()
+            .trim();
+    const fixtureB64 = (name: string) =>
+        toBase64(new Uint8Array(readFileSync(new URL(`./__fixtures__/${name}`, import.meta.url))));
+
+    /** The real seal captured from the public calendars, as a confirmed view stored on the fake server. */
+    function realConfirmedSeal(): SealView {
+        const id = "0192f0d0-0000-7000-8000-0000000000b1";
+        const manifest = fixtureText("manifest.json");
+        server.rows.set(id, {
+            id,
+            chunk_set_id: CHUNK_SET,
+            state: "confirmed",
+            encrypted_record: null,
+            record_nonce: null,
+            encrypted_seal_key: null,
+            seal_key_nonce: null,
+            created_at: 1,
+            updated_at: 1,
+        });
+        return {
+            id,
+            state: "confirmed",
+            createdAt: 1,
+            manifest: decodeManifest(new TextEncoder().encode(manifest)),
+            blocks: [975_723, 975_735, 975_749],
+            record: {
+                v: 1,
+                chunk_set_id: CHUNK_SET,
+                file_name: "sealed-file.txt",
+                manifest,
+                proof: fixtureB64("reference-merged.confirmed.ots"),
+                confirmed_at: "2026-11-14T02:02:00.000Z",
+            },
+        };
+    }
+
+    it("takes the earliest block whose header checks out, and keeps it in the record", async () => {
+        for (const h of [975_723, 975_735, 975_749]) {
+            server.blockHeaders.set(h, fixtureText(`block-${h}.header.hex`));
+        }
+        const view = await resolveBlockTime(realConfirmedSeal());
+        expect(view.record.block_time).toBe("2026-11-13T23:05:03.000Z");
+        expect(view.record.block_height).toBe(975_723);
+
+        const { seals } = await loadSeals();
+        expect(seals.find((s) => s.id === view.id)?.record.block_time).toBe(
+            "2026-11-13T23:05:03.000Z",
+        );
+    });
+
+    it("ignores a source that answers with the wrong block", async () => {
+        // Two heights answered with a real, valid header — of a different block; the third not at all.
+        const other = fixtureText("block-975749.header.hex");
+        for (const h of [975_723, 975_735]) server.blockHeaders.set(h, other);
+        const view = await resolveBlockTime(realConfirmedSeal());
+        expect(view.record.block_time).toBeUndefined();
+    });
+
+    it("with the source off, nothing changes", async () => {
+        const seal = realConfirmedSeal();
+        expect(await resolveBlockTime(seal)).toBe(seal);
+    });
 });

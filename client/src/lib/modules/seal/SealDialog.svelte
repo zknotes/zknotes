@@ -68,7 +68,7 @@ async function onSeal() {
                 created. Changing even one byte makes a different file, which the seal does not cover.
             </p>
             <p>
-                Confirmation usually takes one to six hours. Keep ZKnotes open now and then until the
+                Confirmation usually comes within a few hours. Keep ZKnotes open now and then until the
                 seal shows as sealed.
             </p>
             {#if firstSeal}

@@ -104,6 +104,8 @@ export function apiWebServer(
             SOURCE_URL: E2E_SOURCE_URL,
             // Seals go to the local fake calendar only (http is accepted outside production).
             OTS_CALENDAR_URLS: E2E_OTS_CALENDAR_URL,
+            // No public block explorer from E2E: block times stay off, the confirmation time shows.
+            OTS_BLOCK_SOURCE_URL: "",
             ...extraEnv,
         },
     };

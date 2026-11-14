@@ -1,6 +1,7 @@
 import type {
     CreateSealRequest,
     PutSealRequest,
+    SealBlockHeaderResponse,
     SealListResponse,
     SealSubmitReply,
     SealUpgradeReply,
@@ -37,4 +38,9 @@ export function listSeals() {
 
 export function deleteSeal(id: string) {
     return apiFetch<void>(`/seals/${id}`, { method: "DELETE" });
+}
+
+/** A block header relayed by the server — untrusted; `block-header.ts` checks it before use. */
+export function getSealBlock(height: number) {
+    return apiFetch<SealBlockHeaderResponse>(`/seals/blocks/${height}`);
 }

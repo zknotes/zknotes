@@ -34,8 +34,8 @@ export function startSealUpgrader(): () => void {
         try {
             const { loadSeals, upgradePendingSeals } = await import("./seal-service");
             const { seals } = await loadSeals();
-            const pending = seals.filter((s) => s.state === "pending");
-            if (pending.length > 0 && !stopped) await upgradePendingSeals(pending);
+            const due = seals.filter((s) => s.state === "pending" || !s.record.block_time);
+            if (due.length > 0 && !stopped) await upgradePendingSeals(due);
         } catch {
             // offline, locked, or the server is away — next round
         }

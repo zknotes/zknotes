@@ -450,6 +450,12 @@ export type SealWire = {
     updated_at: number;
 };
 
+/**
+ * `GET /seals/blocks/:height`: a Bitcoin block header, relayed. Untrusted: the client checks its
+ * proof of work and Merkle root against the seal's proof before using its time.
+ */
+export type SealBlockHeaderResponse = { height: number; header: string };
+
 /** `GET /seals`: every seal of the user, and today's allowance. */
 export type SealListResponse = {
     seals: SealWire[];

@@ -6,6 +6,7 @@
 import {
     CreateSealSchema,
     PutSealSchema,
+    type SealBlockHeaderResponse,
     type SealListResponse,
     type SealSubmitReply,
     type SealUpgradeReply,
@@ -22,6 +23,7 @@ import { nowSec } from "../lib/time";
 import { parseBody } from "../lib/validate";
 import { bufToB64, requireB64ToBuf } from "../lib/wire";
 import { requireUserId } from "../plugins/auth";
+import { blockSourceUrl, fetchBlockHeader, isBlockHeight } from "../services/block-source";
 import { calendarUrls, fetchUpgrades, submitCommitment } from "../services/ots-calendar";
 import { QuotaExceededError, updateQuotaTx } from "../services/quota-service";
 import {
@@ -52,7 +54,12 @@ function sealToWire(row: SealRow): SealWire {
 }
 
 const sealRoutes: FastifyPluginAsync = async (fastify) => {
-    const { read: authRead, mut: authMut, userMutRl } = authenticatedRouteOptions(fastify);
+    const {
+        read: authRead,
+        mut: authMut,
+        userMutRl,
+        userReadRl,
+    } = authenticatedRouteOptions(fastify);
     // The calls that reach the calendars get their own, tighter per-IP limit on top of the user one.
     const calendarRoute = {
         preParsing: [fastify.authenticateBeforeBody],
@@ -76,9 +83,9 @@ const sealRoutes: FastifyPluginAsync = async (fastify) => {
         if (!data) return;
 
         const calendars = calendarUrls();
-        if (calendars.length === 0) return reply.status(403).send({ error: "seals_disabled" });
+        if (calendars.length === 0) return reply.status(409).send({ error: "seals_disabled" });
         const limit = sealsPerDay(await fastify.entitlements.forUser(db, userId));
-        if (limit === 0) return reply.status(403).send({ error: "seals_disabled" });
+        if (limit === 0) return reply.status(409).send({ error: "seals_disabled" });
 
         const [existing] = await db
             .select({ id: seals.id })
@@ -209,6 +216,30 @@ const sealRoutes: FastifyPluginAsync = async (fastify) => {
         );
         return reply.send({ results: wire });
     });
+
+    // One block header by height, relayed from the instance's block source. The client checks it
+    // (proof of work, Merkle root) before it believes the time in it.
+    fastify.get(
+        "/seals/blocks/:height",
+        {
+            preParsing: [fastify.authenticateBeforeBody],
+            preHandler: [userReadRl],
+            config: { rateLimit: ipRateLimit(SEAL_CALENDAR_RL_MAX, SEAL_RL_WINDOW) },
+        },
+        async (request, reply) => {
+            const raw = (request.params as { height: string }).height;
+            const height = Number(raw);
+            if (!/^\d{1,10}$/.test(raw) || !isBlockHeight(height)) {
+                return reply.status(400).send({ error: "invalid_height" });
+            }
+            const base = blockSourceUrl();
+            if (!base) return reply.status(409).send({ error: "block_source_disabled" });
+            const header = await fetchBlockHeader(height, base);
+            if (!header) return reply.status(502).send({ error: "block_source_unavailable" });
+            const body: SealBlockHeaderResponse = { height, header };
+            return reply.send(body);
+        },
+    );
 
     fastify.get("/seals", authRead, async (request, reply) => {
         const userId = requireUserId(request);

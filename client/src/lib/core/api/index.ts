@@ -67,7 +67,7 @@ export {
     stageRestoreItems,
     verifyRestoreSession,
 } from "./restore";
-export { createSeal, deleteSeal, listSeals, putSeal, upgradeSeal } from "./seals";
+export { createSeal, deleteSeal, getSealBlock, listSeals, putSeal, upgradeSeal } from "./seals";
 export {
     createShare,
     getShareMeta,

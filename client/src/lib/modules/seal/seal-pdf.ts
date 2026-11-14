@@ -4,7 +4,7 @@
  *
  * jsPDF is loaded only here, on demand, so it never reaches the main bundle.
  */
-import type { SealView } from "./seal-service";
+import { existedBefore, type SealView } from "./seal-service";
 
 /** The standard PDF fonts cover Latin-1 only; anything else would print as garbage. */
 function latin1(text: string): string {
@@ -25,9 +25,8 @@ export const LEGAL_NOTICE = [
 ];
 
 export async function buildCertificatePdf(view: SealView): Promise<Uint8Array> {
-    if (view.state !== "confirmed" || !view.record.confirmed_at) {
-        throw new Error("A pending seal has no certificate yet.");
-    }
+    const before = view.state === "confirmed" ? existedBefore(view.record) : null;
+    if (!before) throw new Error("A pending seal has no certificate yet.");
     const { jsPDF } = await import("jspdf");
     const doc = new jsPDF({ unit: "pt", format: "a4" });
     const left = 56;
@@ -52,7 +51,7 @@ export async function buildCertificatePdf(view: SealView): Promise<Uint8Array> {
     line("ZKnotes", { size: 9, bold: true, gap: 2 });
     line("Certificate of Existence", { size: 20, bold: true, gap: 14 });
     line(
-        `The file described below existed, exactly as fingerprinted here, before ${utcText(view.record.confirmed_at)}.`,
+        `The file described below existed, exactly as fingerprinted here, before ${utcText(before.iso)}.`,
         { size: 11, gap: 16 },
     );
 
@@ -64,13 +63,21 @@ export async function buildCertificatePdf(view: SealView): Promise<Uint8Array> {
     field("Seal ID", m.seal_id, true);
     field("Sealed at (as stated by the sealing device)", utcText(m.sealed_at));
     field(
-        "Existed before (when this device first saw the proof completed)",
-        utcText(view.record.confirmed_at),
+        before.source === "block"
+            ? `Existed before (the time recorded in block ${before.height.toLocaleString("en-US")}, set by its miner)`
+            : "Existed before (when the sealing device first saw the proof completed)",
+        utcText(before.iso),
     );
     field(
         "Anchored in public ledger block",
         view.blocks.map((b) => b.toLocaleString("en-US")).join(", "),
     );
+    if (before.source === "block") {
+        line(
+            "A block's time is set by the miner who found it; the network's rules keep it within about two hours of real time.",
+            { size: 8, gap: 8 },
+        );
+    }
     y += 6;
     line("How to check this certificate", { size: 12, bold: true, gap: 6 });
     line(
