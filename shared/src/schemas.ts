@@ -367,6 +367,101 @@ export const ViewShareSchema = z.object({
 
 export type ViewShareRequest = zod.infer<typeof ViewShareSchema>;
 
+// ── Seals (proof of existence) ─────────────────────────────────────────────────
+
+export const SEAL_LIMITS = {
+    /** The encrypted seal record: manifest, OTS nonce and proof. A complete proof is a few KiB. */
+    MAX_RECORD_BYTES: 64 * 1024,
+    /** Pending attestations one upgrade call may ask about. A seal goes to at most a few calendars. */
+    MAX_UPGRADE_ATTESTATIONS: 16,
+    /** OpenTimestamps caps every message at 4096 bytes. */
+    MAX_MESSAGE_BYTES: 4096,
+    /** The calendar URI length the OTS format allows. */
+    MAX_CALENDAR_URL: 1000,
+} as const;
+
+export const SEAL_STATES = ["pending", "confirmed"] as const;
+export type SealState = (typeof SEAL_STATES)[number];
+
+const hexOf = (maxBytes: number) =>
+    z
+        .string()
+        .regex(/^(?:[0-9a-f]{2})+$/)
+        .max(maxBytes * 2);
+
+/** `POST /seals`: the commitment is `sha256(sha256(manifest) ‖ nonce)` — it reveals nothing. */
+export const CreateSealSchema = z.object({
+    id: z.string().uuid(),
+    chunk_set_id: z.string().uuid(),
+    commitment: z.string().regex(/^[0-9a-f]{64}$/),
+});
+export type CreateSealRequest = zod.infer<typeof CreateSealSchema>;
+
+/** `PUT /seals/:id`: the encrypted record and the seal key wrapped with the Vault Key. */
+export const PutSealSchema = z.object({
+    state: z.enum(SEAL_STATES),
+    encrypted_record: z
+        .string()
+        .regex(B64_CHARS)
+        .max(Math.ceil(SEAL_LIMITS.MAX_RECORD_BYTES / 3) * 4),
+    record_nonce: nonceB64Schema,
+    encrypted_seal_key: z.string().regex(B64_CHARS).length(64), // 48B (32B key + 16B tag) b64
+    seal_key_nonce: nonceB64Schema,
+});
+export type PutSealRequest = zod.infer<typeof PutSealSchema>;
+
+/**
+ * `POST /seals/:id/upgrade`: the (calendar, message) pairs of the proof's pending attestations. A
+ * calendar answers `GET /timestamp/<message>` for the message at its own attestation, which differs
+ * per calendar. The server asks only calendars on its own list.
+ */
+export const UpgradeSealSchema = z.object({
+    attestations: z
+        .array(
+            z.object({
+                calendar: z.string().max(SEAL_LIMITS.MAX_CALENDAR_URL),
+                message: hexOf(SEAL_LIMITS.MAX_MESSAGE_BYTES),
+            }),
+        )
+        .min(1)
+        .max(SEAL_LIMITS.MAX_UPGRADE_ATTESTATIONS),
+});
+export type UpgradeSealRequest = zod.infer<typeof UpgradeSealSchema>;
+
+/** One calendar's answer to `POST /seals`. `body` is the bare OTS timestamp, base64. */
+export type SealSubmitReply = { calendar: string } & ({ ok: true; body: string } | { ok: false });
+
+/** One calendar's answer to an upgrade. `pending` is the calendar's normal "not in a block yet". */
+export type SealUpgradeReply = { calendar: string; message: string } & (
+    | { status: "confirmed"; body: string }
+    | { status: "pending" | "error" | "skipped" }
+);
+
+/** A seal row as `GET /seals` returns it. The record fields are null until the first `PUT`. */
+export type SealWire = {
+    id: string;
+    chunk_set_id: string;
+    state: SealState;
+    encrypted_record: string | null;
+    record_nonce: string | null;
+    encrypted_seal_key: string | null;
+    seal_key_nonce: string | null;
+    created_at: number;
+    updated_at: number;
+};
+
+/**
+ * `GET /seals/blocks/:height`: a Bitcoin block header, relayed. Untrusted: the client checks its
+ * proof of work and Merkle root against the seal's proof before using its time.
+ */
+export type SealBlockHeaderResponse = { height: number; header: string };
+
+/** `GET /seals`: every seal of the user, and today's allowance. */
+export type SealListResponse = {
+    seals: SealWire[];
+    limit: { per_day: number; used_today: number };
+};
+
 // ── File manager limits and upload schema ──────────────────────────────────
 
 /** Batch sync limits. MAX_BATCH_BYTES must stay below the API bodyLimit (30 MB). */

@@ -50,6 +50,8 @@ import { revealFolderInTree } from "$lib/core/utils/reveal-in-tree";
 import { createGlobalTreeKeyHandler } from "$lib/core/utils/tree-keyboard";
 import { onFilesChanged, onNotesChanged } from "$lib/modules/files/files-changed-bus";
 import { registerFilesBridge } from "$lib/modules/files/register-bridge";
+import { registerSealExtensions, startSealUpgrader } from "$lib/modules/seal/register";
+import { loadInstancePublicConfig } from "$lib/core/constants/public-www";
 import {
     loadPersisted,
     rawStringSerde,
@@ -248,6 +250,25 @@ initStreamBridge();
 // Register the modules/files implementations on core/events/file-bridge (the dependency inversion) —
 // core/* (the sync engine, the SW bridge, teardown, drag-drop) calls fileBridge instead of importing modules/*.
 registerFilesBridge();
+
+// Seals: the file panel's "Proof of existence" section and the warning before sealed content is
+// replaced or purged. Only loaders are registered; the module itself loads on first use.
+registerSealExtensions();
+
+// Pending seals are checked soon after unlock and then every half hour while the vault is open, on
+// an instance that seals at all. Locking or logging out stops it.
+$effect(() => {
+    if (!authStore.isVaultUnlocked) return;
+    let stop: (() => void) | null = null;
+    let cancelled = false;
+    void loadInstancePublicConfig().then((config) => {
+        if (!cancelled && config.sealsEnabled) stop = startSealUpgrader();
+    });
+    return () => {
+        cancelled = true;
+        stop?.();
+    };
+});
 
 // The per-user maximum file size (users.max_file_size) — cached for synchronous upload checks.
 void import("$lib/modules/files/limits").then((m) => m.refreshFileLimits());

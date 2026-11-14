@@ -20,7 +20,8 @@ import { escapeHtml, sanitizeHtml } from "$lib/core/utils/dompurify";
 import { applyPresentationFromAttrs } from "$lib/core/utils/table-attrs";
 import { extractFileRefs } from "$lib/modules/files/refs";
 import { isRasterImageMime } from "$lib/modules/files/sniff";
-import { type BackupSink, createBackupSink, ZipStreamWriter } from "./sink";
+import { ZipStreamWriter } from "$lib/core/utils/zip-stream";
+import { type BackupSink, createBackupSink } from "./sink";
 import {
     buildItemPath,
     ExportRun,

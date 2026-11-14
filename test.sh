@@ -185,9 +185,9 @@ run_vitest_step() {
     run_step "$name" vitest_in "$dir" "$note" "${cmd[@]}" "${targets[@]}"
 }
 
-# The test ports Playwright uses (API/web-dev/preview). The user's real dev servers live on other
+# The test ports Playwright uses (API/web-dev/preview/fake OTS calendar). The user's real dev servers live on other
 # ports (3000/5173/5174), so this leaves them alone.
-E2E_PORTS=(3001 5188 4188)
+E2E_PORTS=(3001 5188 4188 3998)
 
 # Only after a hung teardown (see run_e2e_project). It kills only what this checkout started: the
 # vitest/Playwright workers whose command line names this repository, the browsers whose working

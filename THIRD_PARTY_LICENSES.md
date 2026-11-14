@@ -81,6 +81,7 @@ BUSL, Elastic License, Commons Clause, PolyForm or a proprietary license.
 | `fflate` | 0.8.3 | MIT | client |
 | `hash-wasm` | 4.12.0 | MIT | shared |
 | `idb` | 8.0.4 | ISC | client |
+| `jspdf` | 4.2.1 | MIT | client (loaded only when a seal certificate is exported) |
 | `katex` | 0.19.0 | MIT | client |
 | `lucide-svelte` | 1.0.1 | ISC | client |
 | `marked` | 18.1.0 | MIT | client |

@@ -584,6 +584,46 @@ export const shareAttachments = pgTable(
     (table) => [primaryKey({ columns: [table.share_id, table.file_id] })],
 );
 
+/**
+ * A proof-of-existence seal of one chunk set (a file's exact bytes).
+ *
+ * Non-obvious fields:
+ * - `chunk_set_id`: an untrusted pointer for lookups and lifetime. The client trusts the copy inside
+ *   the encrypted record, never this column.
+ * - `state`: `pending` until the proof reaches a Bitcoin block, then `confirmed`. Never goes back.
+ * - `encrypted_record` / `record_nonce`: the seal record (manifest, OTS nonce, proof), encrypted with
+ *   the seal's own key. NULL between `POST /seals` and the client's first `PUT`.
+ * - `encrypted_seal_key` / `seal_key_nonce`: the seal key wrapped with the Vault Key.
+ *
+ * The commitment sent to the calendars is deliberately not a column. The bytes of the four ciphertext
+ * columns count towards the `items` quota bucket; a seal is deleted together with its chunk set.
+ */
+export const seals = pgTable(
+    "seals",
+    {
+        id: text("id").primaryKey(),
+        user_id: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        chunk_set_id: text("chunk_set_id")
+            .notNull()
+            .references(() => chunkSets.id, { onDelete: "cascade" }),
+        state: text("state", { enum: ["pending", "confirmed"] })
+            .notNull()
+            .default("pending"),
+        encrypted_record: bytea("encrypted_record"),
+        record_nonce: bytea("record_nonce"),
+        encrypted_seal_key: bytea("encrypted_seal_key"),
+        seal_key_nonce: bytea("seal_key_nonce"),
+        created_at: epochSeconds("created_at").notNull().default(nowEpoch),
+        updated_at: epochSeconds("updated_at").notNull().default(nowEpoch),
+    },
+    (table) => [
+        index("seals_user_created_idx").on(table.user_id, table.created_at),
+        index("seals_chunk_set_idx").on(table.chunk_set_id),
+    ],
+);
+
 // ── Server-side analytics ──
 
 /** A short-lived working table for exact DAU/MAU — it holds user_id, retained ~38 days. */

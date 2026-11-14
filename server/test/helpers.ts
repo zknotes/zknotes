@@ -22,7 +22,7 @@ export async function resetDb(): Promise<void> {
     // in practice. Waiting here also covers tests that sign in outside `createTestUser`.
     await flushPendingSecurityEvents();
     await db.execute(
-        sql`TRUNCATE TABLE gc_runs, analytics_daily_active_users, analytics_active_users_daily, analytics_route_daily, analytics_auth_daily, analytics_storage_quota_daily, share_attachments, share_links, restore_staged_items, restore_sessions, chunk_sets, file_chunks, upload_sessions, sync_deleted_log, items, sessions, login_failures, users CASCADE`,
+        sql`TRUNCATE TABLE gc_runs, analytics_daily_active_users, analytics_active_users_daily, analytics_route_daily, analytics_auth_daily, analytics_storage_quota_daily, seals, share_attachments, share_links, restore_staged_items, restore_sessions, chunk_sets, file_chunks, upload_sessions, sync_deleted_log, items, sessions, login_failures, users CASCADE`,
     );
 }
 

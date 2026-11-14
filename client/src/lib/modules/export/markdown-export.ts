@@ -17,7 +17,8 @@ import { sanitizeHtml } from "$lib/core/utils/dompurify";
 import { htmlToMarkdown } from "$lib/core/utils/html-to-md";
 import { extractFileRefs } from "$lib/modules/files/refs";
 import { rewriteContent } from "./html-export";
-import { type BackupSink, createBackupSink, ZipStreamWriter } from "./sink";
+import { ZipStreamWriter } from "$lib/core/utils/zip-stream";
+import { type BackupSink, createBackupSink } from "./sink";
 import {
     buildItemPath,
     ExportRun,

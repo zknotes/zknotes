@@ -18,6 +18,7 @@ import fileRoutes from "./routes/files";
 import historyRoutes from "./routes/history";
 import itemRoutes from "./routes/items";
 import restoreRoutes from "./routes/restore";
+import sealRoutes from "./routes/seals";
 import shareRoutes from "./routes/shares";
 import { registerAnalyticsHook } from "./services/analytics/hook";
 import { type ApiExtension, defaultExtensions } from "./server";
@@ -227,6 +228,7 @@ export async function buildApp(
     await fastify.register(fileRoutes);
     await fastify.register(restoreRoutes);
     await fastify.register(shareRoutes);
+    await fastify.register(sealRoutes);
 
     registerAnalyticsHook(fastify);
 

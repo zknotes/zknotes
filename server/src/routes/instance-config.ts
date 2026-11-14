@@ -9,6 +9,7 @@
 // the authenticated `GET /me/storage`.
 import type { FastifyPluginAsync } from "fastify";
 import { TRASH_RETENTION_DAYS } from "../gc";
+import { calendarUrls } from "../services/ots-calendar";
 
 /** Accepts only `https:` (and `http:` in dev, for `zknotes.localhost`). Anything invalid is omitted. */
 function safeUrl(raw: string | undefined): string | undefined {
@@ -48,6 +49,10 @@ const instanceConfigRoutes: FastifyPluginAsync = async (fastify) => {
             // How long Trash keeps an item before GC purges it (TRASH_RETENTION_DAYS) — the Trash
             // page shows "N days left" from this instead of from a constant of its own.
             trashRetentionDays: TRASH_RETENTION_DAYS,
+            // Whether this instance can seal at all (it has at least one OpenTimestamps calendar).
+            // Absent = off: the client then shows no "Seal" action. A user's own allowance comes
+            // from the authenticated `GET /seals`.
+            ...(calendarUrls().length > 0 ? { sealsEnabled: true } : {}),
         });
     });
 };

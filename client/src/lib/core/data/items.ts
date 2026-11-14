@@ -17,6 +17,8 @@ export interface DecryptedItemMeta {
     mime?: string;
     size?: number; // plaintext bytes
     description?: string;
+    /** The file's current chunk set, from the encrypted payload. */
+    chunkSetId?: string;
     // Plaintext sync metadata (never decrypted) — for the UI indicators only.
     dirty?: boolean;
     /** The server version — the server increments it on every successful push. 1 plus dirty = never pushed. */
@@ -124,6 +126,7 @@ interface DecryptedFields {
     mime?: string;
     size?: number;
     description?: string;
+    chunkSetId?: string;
 }
 
 interface MetaCacheEntry {
@@ -156,6 +159,8 @@ function toDecryptedFields(payload: AnyItemPayload): DecryptedFields {
         mime: payload.mime,
         size: payload.size,
         description: payload.description,
+        // The file's chunk set, from the encrypted payload (not the server's column) — what a seal names.
+        chunkSetId: payload.chunkSetId,
     };
 }
 
@@ -241,6 +246,7 @@ export async function getTreeItems(): Promise<DecryptedItemMeta[]> {
             mime: fields?.mime,
             size: fields?.size,
             description: fields?.description,
+            chunkSetId: fields?.chunkSetId,
             dirty: item.dirty,
             version: item.version,
             localRev: item.localRev,

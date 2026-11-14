@@ -5,6 +5,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+### Added
+
+- **Proof of existence (Beta).** A file can now be sealed from its detail panel: you get
+  independent proof that exactly these bytes existed before a point in time, anchored with
+  OpenTimestamps. The seal shows as pending until a timestamp service commits it, usually within
+  a few hours, and then as sealed, with the time its block was mined: the app fetches that block's
+  header and checks its proof of work and its link to the seal itself, so the time cannot be
+  faked by the source. Sealed files carry a stamp in the file list. A sealed file exports a
+  certificate archive (the file, its
+  manifest, the proof, a PDF certificate and step-by-step instructions) that anyone can check
+  with free, standard tools, without ZKnotes. Only a 32-byte commitment leaves your device; the
+  file, its name and its fingerprint stay encrypted. A seal proves existence before a time, not
+  authorship, truth or the time of creation. Replacing or permanently deleting sealed content
+  warns first, because the seal ends with it.
+- Self-hosting: `OTS_CALENDAR_URLS` chooses the timestamp services the server relays to (four
+  public ones by default; empty turns sealing off), `SEALS_PER_DAY` sets how many seals a user
+  may create in 24 hours (default 20), and `OTS_BLOCK_SOURCE_URL` names the Esplora-compatible
+  API block headers come from (blockstream.info by default; empty shows the confirmation time
+  instead).
+
 ## [0.3.2] - 2026-11-03
 
 ### Fixed

@@ -37,6 +37,27 @@ export function triggerAnchorDownload(url: string, filename: string): void {
 }
 
 /**
+ * The fallback where there is no "Save as" picker: collects the bytes and downloads them as one
+ * blob on close. Memory grows with the output — the picker is the streaming path.
+ */
+export function blobDownloadSink(filename: string, mime: string): ByteSink {
+    const chunks: Uint8Array[] = [];
+    return {
+        write: async (bytes) => {
+            chunks.push(bytes);
+        },
+        close: async () => {
+            const url = URL.createObjectURL(new Blob(chunks as BlobPart[], { type: mime }));
+            triggerAnchorDownload(url, filename);
+            setTimeout(() => URL.revokeObjectURL(url), 0);
+        },
+        abort: async () => {
+            chunks.length = 0;
+        },
+    };
+}
+
+/**
  * Opens the "Save as" picker and returns a sink onto the chosen file, or `null` when the browser
  * has no picker or refused it quietly (a SecurityError: no user gesture, say) — the caller then
  * falls back to a blob download. A user who cancels the picker gets the caller's own error.

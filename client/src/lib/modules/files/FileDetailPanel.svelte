@@ -29,6 +29,7 @@ import FilePresenceBadge from "./FilePresenceBadge.svelte";
 import { pinManager } from "$lib/core/files/pin-manager-state.svelte";
 import { checkFilePresence, type FilePresence } from "$lib/modules/files/presence";
 import { onFilesChanged } from "./files-changed-bus";
+import { type FilePanelFile, filePanelExtensions } from "$lib/core/events/file-panel-extensions";
 
 interface Props {
     file: DecryptedItemMeta;
@@ -130,11 +131,32 @@ async function onSaveMeta() {
     }
 }
 
+// Feature sections registered by other modules (the seal section, say) — loaded only when shown.
+const extraSections = filePanelExtensions.sections();
+const panelFile = $derived<FilePanelFile>({
+    id: file.id,
+    title: file.title,
+    updatedAt: file.updated_at,
+});
+
+// Replacing the bytes ends whatever vouches for the current ones (a seal). Asked after the new
+// content is chosen and before anything is written, so cancelling changes nothing.
+let contentWarning = $state<{ messages: string[]; proceed: () => void } | null>(null);
+async function guardContentChange(proceed: () => void) {
+    const messages = await filePanelExtensions.contentWarnings(file.id);
+    if (messages.length === 0) proceed();
+    else contentWarning = { messages, proceed };
+}
+
 async function onReplacePicked(e: Event) {
     const input = e.target as HTMLInputElement;
     const picked = input.files?.[0];
     input.value = "";
     if (!picked) return;
+    await guardContentChange(() => void replaceWith(picked));
+}
+
+async function replaceWith(picked: File) {
     replacing = "Encrypting…";
     errorMsg = null;
     try {
@@ -175,6 +197,10 @@ async function onEditImage() {
 async function onEditResult(blob: Blob, _skipped: boolean) {
     const name = editing?.name ?? file.title;
     editing = null;
+    await guardContentChange(() => void saveEdited(blob, name));
+}
+
+async function saveEdited(blob: Blob, name: string) {
     replacing = "Replacing…";
     errorMsg = null;
     try {
@@ -481,6 +507,12 @@ async function onDownloadToCache() {
                 </dd>
             </div>
         </dl>
+
+        {#each extraSections as section (section.key)}
+            {#await section.load() then mod}
+                <mod.default file={panelFile} />
+            {/await}
+        {/each}
     </div>
 
     <!-- The actions -->
@@ -591,6 +623,32 @@ async function onDownloadToCache() {
                 <Button onclick={() => (confirmDelete = false)}>Cancel</Button>
                 <Button variant="danger" onclick={onDelete} disabled={deleting} loading={deleting}>
                     <Trash2 class="w-3 h-3" /> Move to trash
+                </Button>
+            </DialogActions>
+        {/snippet}
+    </Dialog>
+{/if}
+
+{#if contentWarning}
+    <Dialog title="Replace sealed content?">
+        {#snippet children()}
+            {#each contentWarning?.messages ?? [] as message}
+                <p class="text-xs text-[var(--text-muted)] mb-3">{message}</p>
+            {/each}
+        {/snippet}
+        {#snippet footer()}
+            <DialogActions>
+                <Button onclick={() => (contentWarning = null)}>Cancel</Button>
+                <Button
+                    variant="danger"
+                    onclick={() => {
+                        const proceed = contentWarning?.proceed;
+                        contentWarning = null;
+                        proceed?.();
+                    }}
+                    data-testid="content-warning-proceed"
+                >
+                    <RefreshCw class="w-3 h-3" /> Replace anyway
                 </Button>
             </DialogActions>
         {/snippet}

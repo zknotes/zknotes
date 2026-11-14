@@ -5,7 +5,10 @@ import {
     buildChunkAad,
     buildItemKeyAad,
     buildPayloadAad,
+    buildSealKeyWrapAad,
+    buildSealRecordAad,
     buildShareWrapAad,
+    createSha256Hasher,
     decryptChunk,
     decryptItemKey,
     decryptPayload,
@@ -52,6 +55,22 @@ let miniSearch: MiniSearch<SearchDoc> | null = null;
 const shareKeyCache = new Map<string, Uint8Array>();
 
 /**
+ * Open content hashes of seals in progress, by session id. A seal decrypts its file chunk by chunk
+ * in here and only the digest goes back. Capped, so an abandoned session cannot pile up.
+ */
+const sealHashes = new Map<
+    string,
+    { hasher: ReturnType<typeof createSha256Hasher>; byteLength: number }
+>();
+const MAX_SEAL_HASH_SESSIONS = 8;
+
+function toHexString(bytes: Uint8Array): string {
+    let s = "";
+    for (const b of bytes) s += b.toString(16).padStart(2, "0");
+    return s;
+}
+
+/**
  * Wipe every session secret, except that INIT immediately sets a new vaultKey.
  * itemKeys, the MiniSearch plaintext and shareKeyCache have to disappear on re-login or logout —
  * otherwise the previous account lingers inside the SharedWorker.
@@ -66,6 +85,7 @@ function wipeSessionSecrets(): void {
         zeroize(key);
     });
     shareKeyCache.clear();
+    sealHashes.clear();
     miniSearch = null;
 }
 
@@ -370,6 +390,118 @@ async function handleMessage(event: MessageEvent, port: MessagePort | typeof sel
                     },
                     [exactPlaintext.buffer],
                 );
+                break;
+            }
+
+            // ── Seals ─────────────────────────────────────────────────────────────────────
+            // The content hash: the file is decrypted chunk by chunk and hashed here, so the
+            // plaintext never comes back out. Only the SHA-256 and the length do.
+            case "SEAL_HASH_START": {
+                if (!vaultKey) throw new Error("Worker not unlocked");
+                const { sessionId } = payload as { sessionId: string };
+                if (sealHashes.size >= MAX_SEAL_HASH_SESSIONS) {
+                    const oldest = sealHashes.keys().next().value;
+                    if (oldest !== undefined) sealHashes.delete(oldest);
+                }
+                sealHashes.set(sessionId, { hasher: createSha256Hasher(), byteLength: 0 });
+                port.postMessage({ id, type: "SEAL_HASH_START_SUCCESS" });
+                break;
+            }
+
+            case "SEAL_HASH_CHUNK": {
+                if (!vaultKey) throw new Error("Worker not unlocked");
+                const {
+                    sessionId,
+                    itemId,
+                    chunkSetId,
+                    chunkIndex,
+                    totalChunks,
+                    ciphertext,
+                    nonce,
+                } = payload;
+                const session = sealHashes.get(sessionId);
+                if (!session) throw new Error("Unknown seal hash session");
+                const ik = itemKeys.get(itemId);
+                if (!ik) throw new Error(`Item key not found for ${itemId}`);
+                const plaintext = decryptChunk(
+                    new Uint8Array(ciphertext),
+                    new Uint8Array(nonce),
+                    ik,
+                    buildChunkAad(chunkSetId, chunkIndex, totalChunks),
+                );
+                session.hasher.update(plaintext);
+                session.byteLength += plaintext.byteLength;
+                zeroize(plaintext);
+                port.postMessage({ id, type: "SEAL_HASH_CHUNK_SUCCESS" });
+                break;
+            }
+
+            case "SEAL_HASH_FINISH": {
+                const { sessionId } = payload as { sessionId: string };
+                const session = sealHashes.get(sessionId);
+                if (!session) throw new Error("Unknown seal hash session");
+                sealHashes.delete(sessionId);
+                port.postMessage({
+                    id,
+                    type: "SEAL_HASH_FINISH_SUCCESS",
+                    payload: {
+                        sha256Hex: toHexString(session.hasher.digest()),
+                        byteLength: session.byteLength,
+                    },
+                });
+                break;
+            }
+
+            // A seal record is encrypted with its own fresh 32-byte key, wrapped with the Vault Key.
+            // Both carry an AAD with their own prefix and the seal id, so the record never shares a
+            // (key, AAD) pair with an item payload and cannot be moved to another seal row. The
+            // seal key never leaves the worker.
+            case "SEAL_ENCRYPT_RECORD": {
+                if (!vaultKey) throw new Error("Worker not unlocked");
+                const { sealId, record } = payload as { sealId: string; record: object };
+                const sealKey = new Uint8Array(32);
+                crypto.getRandomValues(sealKey);
+                const enc = encryptPayload(record, sealKey, buildSealRecordAad(sealId));
+                const wrapped = encryptItemKey(sealKey, vaultKey, buildSealKeyWrapAad(sealId));
+                zeroize(sealKey);
+                port.postMessage({
+                    id,
+                    type: "SEAL_ENCRYPT_RECORD_SUCCESS",
+                    payload: {
+                        encryptedRecord: Array.from(enc.ciphertext),
+                        recordNonce: Array.from(enc.nonce),
+                        encryptedSealKey: Array.from(wrapped.ciphertext),
+                        sealKeyNonce: Array.from(wrapped.nonce),
+                    },
+                });
+                break;
+            }
+
+            case "SEAL_DECRYPT_RECORD": {
+                if (!vaultKey) throw new Error("Worker not unlocked");
+                const { sealId, encryptedRecord, recordNonce, encryptedSealKey, sealKeyNonce } =
+                    payload;
+                const sealKey = decryptItemKey(
+                    new Uint8Array(encryptedSealKey),
+                    new Uint8Array(sealKeyNonce),
+                    vaultKey,
+                    buildSealKeyWrapAad(sealId),
+                );
+                try {
+                    const record = decryptPayload<object>(
+                        new Uint8Array(encryptedRecord),
+                        new Uint8Array(recordNonce),
+                        sealKey,
+                        buildSealRecordAad(sealId),
+                    );
+                    port.postMessage({
+                        id,
+                        type: "SEAL_DECRYPT_RECORD_SUCCESS",
+                        payload: { record },
+                    });
+                } finally {
+                    zeroize(sealKey);
+                }
                 break;
             }
 

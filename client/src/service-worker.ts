@@ -40,6 +40,7 @@ const API_PREFIXES = [
     "/uploads",
     "/me",
     "/shares",
+    "/seals",
     "/instance-config",
     "/client-log",
     "/client-error",

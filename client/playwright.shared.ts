@@ -10,6 +10,20 @@ import { FILE_LIMITS } from "@zknotes/shared";
 export const E2E_WEB_PORT = 5188;
 /** The SOURCE_URL the E2E API serves through /instance-config — the legal footer links to it. */
 export const E2E_SOURCE_URL = "https://example.com/zknotes-source";
+/** The local fake OpenTimestamps calendar (e2e/helpers/fake-ots-calendar.ts); no E2E reaches a real one. */
+export const E2E_OTS_CALENDAR_PORT = 3998;
+export const E2E_OTS_CALENDAR_URL = `http://127.0.0.1:${E2E_OTS_CALENDAR_PORT}`;
+
+/** The `webServer` entry for the fake calendar; it has to be up before the API is asked to seal. */
+export function fakeOtsCalendarWebServer() {
+    return {
+        command: "exec bun e2e/helpers/fake-ots-calendar.ts",
+        url: `${E2E_OTS_CALENDAR_URL}/health`,
+        timeout: 15_000,
+        reuseExistingServer: !process.env.CI,
+        env: { FAKE_OTS_CALENDAR_PORT: String(E2E_OTS_CALENDAR_PORT) },
+    };
+}
 
 /**
  * The system Chrome — cross-platform. CI/Linux has `/bin/google-chrome`, macOS has Chrome.app.
@@ -88,6 +102,10 @@ export function apiWebServer(
             S3_SECRET_KEY: "minioadmin-dev-secret",
             // So the legal footer has a Source link to assert on (01-auth.spec.ts).
             SOURCE_URL: E2E_SOURCE_URL,
+            // Seals go to the local fake calendar only (http is accepted outside production).
+            OTS_CALENDAR_URLS: E2E_OTS_CALENDAR_URL,
+            // No public block explorer from E2E: block times stay off, the confirmation time shows.
+            OTS_BLOCK_SOURCE_URL: "",
             ...extraEnv,
         },
     };

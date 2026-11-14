@@ -190,6 +190,24 @@ const folderOptions = $derived(
         .sort((a, b) => a.title.localeCompare(b.title)),
 );
 
+// Which files are sealed — a stamp on the card. Loaded with the list, and again whenever the
+// detail panel closes (a seal may have been made or confirmed there). Offline it stays empty.
+let sealMarkers = $state<ReadonlyMap<string, { label: string; done: boolean }>>(new Map());
+$effect(() => {
+    const fileMetas = (itemsQuery.data ?? []).filter((i) => i.type === "file");
+    if (selectedId !== null || fileMetas.length === 0) return;
+    let cancelled = false;
+    void import("$lib/modules/seal/seal-service")
+        .then(({ sealMarkers: load }) => load(fileMetas))
+        .then((m) => {
+            if (!cancelled) sealMarkers = m;
+        })
+        .catch(() => {});
+    return () => {
+        cancelled = true;
+    };
+});
+
 let files = $derived.by<VirtualItem[]>(() => {
     const allItems = itemsQuery.data ?? [];
     const itemMap = new Map<string, DecryptedItemMeta>();
@@ -426,6 +444,7 @@ const headerTitle = $derived(
                 onSelect={(f) => (selectedId = f.id)}
                 {selectedIds}
                 onToggle={toggleSelected}
+                markers={sealMarkers}
             />
         </div>
     {/if}

@@ -14,7 +14,8 @@ import { strToU8 } from "fflate";
 import { decryptItemPayload } from "$lib/core/crypto/item-codec";
 import { decryptFile } from "$lib/modules/files/download";
 import { BackupEncryptor, ENCRYPTED_BACKUP_EXT } from "./backup-crypto";
-import { type BackupSink, createBackupSink, encryptedSink, ZipStreamWriter } from "./sink";
+import { ZipStreamWriter } from "$lib/core/utils/zip-stream";
+import { type BackupSink, createBackupSink, encryptedSink } from "./sink";
 import { type ExportResult, ExportRun, loadLiveItems } from "./utils";
 
 export interface FullBackupProgress {

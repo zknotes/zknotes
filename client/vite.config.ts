@@ -73,9 +73,11 @@ export default defineConfig({
     // worker's `minisearch` only when the first page booted the worker, re-bundled and reloaded every
     // open page — which landed in the middle of the first E2E tests' sign-in. Vite
     // concatenates this list with SvelteKit's route globs, so the routes stay scanned.
+    // `jspdf` is the same story through a lazy `import()`: the seal certificate loads it on the first
+    // export, and on a cold cache Vite discovered it then and reloaded the page mid-export.
     optimizeDeps: {
         entries: ["src/lib/core/workers/*.worker.ts"],
-        include: ["fflate"],
+        include: ["fflate", "jspdf"],
     },
     server: {
         // Localhost only, unless asked: the dev server carries dev-only log routes and no auth of
@@ -104,6 +106,7 @@ export default defineConfig({
             "/uploads": "http://127.0.0.1:3000",
             "/me": "http://127.0.0.1:3000",
             "/shares": "http://127.0.0.1:3000",
+            "/seals": "http://127.0.0.1:3000",
             "/instance-config": "http://127.0.0.1:3000",
             "/client-error": "http://127.0.0.1:3000",
             "/client-log": "http://127.0.0.1:3000",
