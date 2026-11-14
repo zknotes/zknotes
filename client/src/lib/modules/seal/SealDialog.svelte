@@ -72,17 +72,17 @@ async function onSeal() {
                 seal shows as sealed.
             </p>
             {#if firstSeal}
-                <Callout variant="warning" size="sm">
-                    <label class="flex items-start gap-2 cursor-pointer">
-                        <Checkbox bind:checked={acknowledged} class="mt-0.5" data-testid="seal-ack" />
-                        <span>
-                            <strong>I understand this action is permanent.</strong> A cryptographic
-                            proof (hash) will be irreversibly recorded on the public Bitcoin network and
-                            cannot be deleted. The contents of your file remain completely private and
-                            are never sent anywhere.
-                        </span>
-                    </label>
+                <!-- The warning in the callout, the checkbox on the dialog's own surface: inside the
+                     tinted box the checkbox's hairline border all but vanished until hovered. -->
+                <Callout variant="warning" size="sm" class="text-xs">
+                    A cryptographic proof (hash) will be irreversibly recorded on the public Bitcoin
+                    network and cannot be deleted. The contents of your file remain completely private
+                    and are never sent anywhere.
                 </Callout>
+                <label class="flex items-center gap-2 cursor-pointer text-[var(--text)]">
+                    <Checkbox bind:checked={acknowledged} data-testid="seal-ack" />
+                    <span class="font-medium">I understand this action is permanent.</span>
+                </label>
             {/if}
             {#if running}
                 <p class="flex items-center gap-2 text-[var(--text-sub)]">
