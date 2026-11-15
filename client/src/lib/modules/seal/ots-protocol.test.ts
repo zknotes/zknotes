@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
     appendOp,
+    bitcoinAnchors,
     bitcoinHeights,
     createSealTree,
     fromHex,
@@ -13,6 +14,7 @@ import {
     parseDetached,
     parseTimestamp,
     pendingAttestations,
+    prependOp,
     serializeDetached,
     serializeTimestamp,
     sha256Op,
@@ -206,6 +208,90 @@ describe("confirmed proofs (the calendars' answers once the stamp reached a bloc
             if (attestation.kind !== "bitcoin") continue;
             expect(toHex(msg.slice().reverse())).toBe(BLOCK_ROOTS[attestation.height]);
         }
+    });
+});
+
+describe("Bitcoin anchors (spec 171)", () => {
+    /**
+     * Each calendar transaction the fixtures pass through, with its OP_RETURN payload. Checked
+     * against a public block explorer on 2026-11-15: every txid is in the stated block, and its
+     * OP_RETURN output holds exactly this payload.
+     */
+    const ANCHORS = {
+        alice: {
+            height: 975_723,
+            txid: "25a9d2b59bb7bc3ee6b345f146c643d425b022f833c4be86ce8fcbb2c8edb122",
+            opReturn: "9ac067eaa7b1c6548ce25765fe5588f8ceb69b34ca0a062fda5cdb58d02c98cd",
+        },
+        bob: {
+            height: 975_723,
+            txid: "166398379b12ebf1fda0873f10b7422516b26ed29be24a132c00fbc4a24c446c",
+            opReturn: "d7a38fd0271ad8bc1375fa2784c0468e6e7b1d10bd8b1edf6d7e099649a8e043",
+        },
+        catallaxy: {
+            height: 975_735,
+            txid: "1d7664504a93ec8e23d8217bdd6aa3c262dbaacb47d97efbfb94a38c61a165c3",
+            opReturn: "fd93fca9fff3cea83045087228559bb2a8f99fec5b839b7d8d432151173b822d",
+        },
+        finney: {
+            height: 975_749,
+            txid: "815c19d6655b45bdc7f194cffc99298a6ef09a575875d561b85e4e0d0f38b9c2",
+            opReturn: "7ce08c3bc137df6e32da42e5ee1b918ef2c6fa0f75d780fdd9f8c1cfd145a13e",
+        },
+    };
+
+    it("AC1: the official client's confirmed proof has one anchor", async () => {
+        const proof = await parseDetached(fixture("official.confirmed.ots"));
+        expect(bitcoinAnchors(proof.timestamp)).toEqual([ANCHORS.alice]);
+    });
+
+    it("AC2: the merged proof has all four, by block height and then txid", async () => {
+        const proof = await parseDetached(fixture("reference-merged.confirmed.ots"));
+        expect(bitcoinAnchors(proof.timestamp)).toEqual([
+            ANCHORS.bob,
+            ANCHORS.alice,
+            ANCHORS.catallaxy,
+            ANCHORS.finney,
+        ]);
+    });
+
+    it("AC2: each OP_RETURN payload is a message on the proof's own path, never the file digest", async () => {
+        const proof = await parseDetached(fixture("reference-merged.confirmed.ots"));
+        for (const a of bitcoinAnchors(proof.timestamp)) {
+            expect(proof.timestamp.findNodes(fromHex(a.opReturn)).length).toBeGreaterThan(0);
+            expect(a.opReturn).not.toBe(toHex(proof.timestamp.msg));
+        }
+    });
+
+    it("AC3: a pending proof has none", async () => {
+        const proof = await parseDetached(fixture("official.pending.ots"));
+        expect(bitcoinAnchors(proof.timestamp)).toEqual([]);
+    });
+
+    it("AC3: a double hash of a long message is not a transaction without OP_RETURN of an ancestor", async () => {
+        const root = new Timestamp(new Uint8Array(32).fill(1));
+        // 0x6a 0x20 followed by 32 bytes that are not any message on the path.
+        const fakeTx = new Uint8Array([0x02, 0, 0, 0, 0x6a, 0x20, ...new Uint8Array(32).fill(9)]);
+        const long = await (await root.addOp(prependOp(fakeTx))).addOp(
+            appendOp(new Uint8Array(40)),
+        );
+        const leaf = await (await long.addOp(sha256Op)).addOp(sha256Op);
+        leaf.addAttestation({ kind: "bitcoin", height: 900_000 });
+        expect(bitcoinHeights(root)).toEqual([900_000]);
+        expect(bitcoinAnchors(root)).toEqual([]);
+
+        // The same shape with the root's own message after OP_RETURN is recognized.
+        const realTx = new Uint8Array([0x02, 0, 0, 0, 0x6a, 0x20]);
+        const ok = await (await root.addOp(prependOp(realTx))).addOp(appendOp(new Uint8Array(40)));
+        const okLeaf = await (await ok.addOp(sha256Op)).addOp(sha256Op);
+        okLeaf.addAttestation({ kind: "bitcoin", height: 900_001 });
+        expect(bitcoinAnchors(root)).toEqual([
+            {
+                height: 900_001,
+                txid: toHex(okLeaf.msg.slice().reverse()),
+                opReturn: toHex(root.msg),
+            },
+        ]);
     });
 });
 

@@ -121,8 +121,11 @@ import { putLocalChunk } from "$lib/core/db/file-chunks";
 import { fromBase64, toBase64 } from "$lib/core/utils/base64";
 import { unlockWorker } from "$lib/core/workers/crypto-rpc";
 import { createMemorySink } from "$lib/modules/export/sink";
+import { txUrl } from "./explorer";
 import {
     appendOp,
+    type BitcoinAnchor,
+    bitcoinAnchors,
     fromHex,
     parseDetached,
     serializeTimestamp,
@@ -130,7 +133,8 @@ import {
     Timestamp,
     toHex,
 } from "./ots-protocol";
-import { writeCertificateArchive } from "./seal-export";
+import { buildCertificatePdf } from "./seal-pdf";
+import { verifyText, writeCertificateArchive } from "./seal-export";
 import {
     loadSeals,
     resolveBlockTime,
@@ -349,6 +353,15 @@ describe("upgrade and export", () => {
     }, 30_000);
 });
 
+/** The anchors of `reference-merged.confirmed.ots` (values pinned in ots-protocol.test.ts). */
+let REAL_ANCHORS: BitcoinAnchor[] = [];
+beforeAll(async () => {
+    const bytes = new Uint8Array(
+        readFileSync(new URL("./__fixtures__/reference-merged.confirmed.ots", import.meta.url)),
+    );
+    REAL_ANCHORS = bitcoinAnchors((await parseDetached(bytes)).timestamp);
+});
+
 describe("block time", () => {
     const fixtureText = (name: string) =>
         readFileSync(new URL(`./__fixtures__/${name}`, import.meta.url))
@@ -378,6 +391,7 @@ describe("block time", () => {
             createdAt: 1,
             manifest: decodeManifest(new TextEncoder().encode(manifest)),
             blocks: [975_723, 975_735, 975_749],
+            anchors: REAL_ANCHORS,
             record: {
                 v: 1,
                 chunk_set_id: CHUNK_SET,
@@ -414,5 +428,49 @@ describe("block time", () => {
     it("with the source off, nothing changes", async () => {
         const seal = realConfirmedSeal();
         expect(await resolveBlockTime(seal)).toBe(seal);
+    });
+
+    it("spec 171 AC4: VERIFY.txt links every anchor's transaction and says it is not the fingerprint", () => {
+        const seal = realConfirmedSeal();
+        expect(seal.anchors.length).toBe(4);
+        const text = verifyText(seal, "sealed-file.txt");
+        for (const a of seal.anchors) {
+            expect(text).toContain(`Block ${a.height}, transaction ${a.txid}`);
+            expect(text).toContain(txUrl(a.txid));
+            expect(text).toContain(`OP_RETURN: ${a.opReturn}`);
+        }
+        expect(text).toContain("It is NOT the file's fingerprint");
+        expect(Math.max(...text.split("\n").map((l) => l.length))).toBeLessThanOrEqual(110);
+    });
+
+    it("spec 171 AC4: without recognized anchors VERIFY.txt keeps today's text", () => {
+        const text = verifyText({ ...realConfirmedSeal(), anchors: [] }, "sealed-file.txt");
+        expect(text).not.toContain("OP_RETURN");
+        expect(text).toContain("Block height(s): 975723, 975735, 975749");
+    });
+
+    it("spec 171 AC5: the PDF names every transaction and links it", async () => {
+        const seal = {
+            ...realConfirmedSeal(),
+            record: {
+                ...realConfirmedSeal().record,
+                block_time: "2026-11-13T23:05:03.000Z",
+                block_height: 975_723,
+            },
+        };
+        const pdf = new TextDecoder("latin1").decode(await buildCertificatePdf(seal));
+        for (const a of seal.anchors) {
+            expect(pdf).toContain(a.txid);
+            expect(pdf).toContain(`/URI (${txUrl(a.txid)})`);
+        }
+        // Four anchors move the whole legal notice to a second page instead of off the first.
+        expect(pdf.match(/\/Type \/Page\b/g)?.length).toBe(2);
+        expect(pdf).toContain("evidentiary value");
+
+        // Two anchors (two calendars in one block, the common case) still fit on one page.
+        const two = new TextDecoder("latin1").decode(
+            await buildCertificatePdf({ ...seal, anchors: seal.anchors.slice(0, 2) }),
+        );
+        expect(two.match(/\/Type \/Page\b/g)?.length).toBe(1);
     });
 });

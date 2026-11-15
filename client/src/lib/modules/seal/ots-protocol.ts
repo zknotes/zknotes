@@ -459,6 +459,61 @@ export function bitcoinHeights(root: Timestamp): number[] {
     return [...heights].sort((a, b) => a - b);
 }
 
+/** Where a proof reaches Bitcoin: the calendar's transaction and the 32 bytes its OP_RETURN holds. */
+export type BitcoinAnchor = {
+    readonly height: number;
+    /** As block explorers print it: the reverse of the double-SHA-256 bytes. */
+    readonly txid: string;
+    /** The OP_RETURN payload, a message on the proof's own path (never the file's fingerprint). */
+    readonly opReturn: string;
+};
+
+/** OP_RETURN followed by a 32-byte push. */
+const OP_RETURN_PUSH32 = [0x6a, 0x20] as const;
+
+/**
+ * The Bitcoin transactions the proof passes through. A calendar commits its Merkle tip by
+ * prepending and appending the rest of a transaction around it, then hashes the result twice:
+ * that double SHA-256 is the txid, and the path goes on from it through the block's Merkle tree.
+ *
+ * A node counts as a transaction only when its message is longer than 64 bytes, its next two ops
+ * are SHA-256, and it holds `OP_RETURN PUSH32 <x>` where `x` is the message of an ancestor on the
+ * same path. Without the ancestor rule any double hash of a long message would pass. Messages were
+ * computed when the proof was parsed, so nothing is hashed here.
+ */
+export function bitcoinAnchors(root: Timestamp): BitcoinAnchor[] {
+    const found = new Map<string, BitcoinAnchor>();
+    const unary = (t: Timestamp, tag: number) => t.ops.get(`${tag}`)?.stamp;
+    const walk = (t: Timestamp, ancestors: Uint8Array[]) => {
+        const once = unary(t, OP.sha256);
+        const twice = once && unary(once, OP.sha256);
+        if (twice && t.msg.length > 64) {
+            const payload = opReturnFromAncestor(t.msg, ancestors);
+            if (payload) {
+                const txid = toHex(twice.msg.slice().reverse());
+                for (const height of bitcoinHeights(twice)) {
+                    found.set(`${height}:${txid}`, { height, txid, opReturn: toHex(payload) });
+                }
+            }
+        }
+        const next = [...ancestors, t.msg];
+        for (const { stamp } of t.ops.values()) walk(stamp, next);
+    };
+    walk(root, []);
+    return [...found.values()].sort((a, b) =>
+        a.height !== b.height ? a.height - b.height : a.txid < b.txid ? -1 : 1,
+    );
+}
+
+function opReturnFromAncestor(msg: Uint8Array, ancestors: Uint8Array[]): Uint8Array | null {
+    for (let i = 0; i + 2 + 32 <= msg.length; i++) {
+        if (msg[i] !== OP_RETURN_PUSH32[0] || msg[i + 1] !== OP_RETURN_PUSH32[1]) continue;
+        const payload = msg.subarray(i + 2, i + 34);
+        if (ancestors.some((a) => equalBytes(a, payload))) return payload.slice();
+    }
+    return null;
+}
+
 // ── Byte helpers ─────────────────────────────────────────────────────────────────────────────────
 
 const EMPTY = new Uint8Array(0);
