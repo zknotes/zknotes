@@ -466,6 +466,8 @@ describe("block time", () => {
         // Four anchors move the whole legal notice to a second page instead of off the first.
         expect(pdf.match(/\/Type \/Page\b/g)?.length).toBe(2);
         expect(pdf).toContain("evidentiary value");
+        // Spec 169 §3: the certificate names no ledger technology.
+        expect(pdf).not.toMatch(/bitcoin|blockchain/i);
 
         // Two anchors (two calendars in one block, the common case) still fit on one page.
         const two = new TextDecoder("latin1").decode(

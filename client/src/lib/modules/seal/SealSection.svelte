@@ -185,7 +185,7 @@ async function onExport() {
                             {@const a = s.anchors[0]}
                             <!-- The earliest anchor; the certificate lists them all. -->
                             <p class="mt-1 text-2xs text-[var(--text-dim)]" data-testid="seal-anchor">
-                                Recorded in Bitcoin block
+                                Recorded in public ledger block
                                 <a
                                     href={blockUrl(a.height)}
                                     target="_blank"

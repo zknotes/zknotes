@@ -107,7 +107,7 @@ export async function buildCertificatePdf(view: SealView): Promise<Uint8Array> {
         y += 2;
         heading("Where the proof is recorded", 11, 70);
         line(
-            "Each anchor is a Bitcoin transaction made by a timestamp calendar. Its OP_RETURN output holds a value computed from manifest.json along the proof's path, not the file's fingerprint, which is never published. Any block explorer shows it by its id; each id below links to mempool.space.",
+            "Each anchor is a transaction a timestamp calendar wrote to the public ledger. Its OP_RETURN output holds a value computed from manifest.json along the proof's path, not the file's fingerprint, which is never published. Any block explorer shows it by its id; each id below links to mempool.space.",
             { size: 8, gap: 5 },
         );
         for (const a of view.anchors) {
