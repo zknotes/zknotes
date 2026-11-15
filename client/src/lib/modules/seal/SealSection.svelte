@@ -7,6 +7,7 @@ import { loadInstancePublicConfig } from "$lib/core/constants/public-www";
 import type { FilePanelFile } from "$lib/core/events/file-panel-extensions";
 import { Button, Callout, Checkbox, Dialog, DialogActions, ErrorText, Eyebrow } from "$lib/core/ui";
 import { formatDate } from "$lib/core/utils/format";
+import { blockUrl, txUrl } from "./explorer";
 import SealBadge from "./SealBadge.svelte";
 import SealDialog from "./SealDialog.svelte";
 import {
@@ -180,6 +181,28 @@ async function onExport() {
                                 confirmed. Seal the file again.
                             {/if}
                         </p>
+                        {#if st === "confirmed" && s.anchors[0]}
+                            {@const a = s.anchors[0]}
+                            <!-- The earliest anchor; the certificate lists them all. -->
+                            <p class="mt-1 text-2xs text-[var(--text-dim)]" data-testid="seal-anchor">
+                                Recorded in Bitcoin block
+                                <a
+                                    href={blockUrl(a.height)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    class="underline hover:text-[var(--text)]"
+                                >{a.height.toLocaleString("en-US")}</a>,
+                                transaction
+                                <a
+                                    href={txUrl(a.txid)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    title="{a.txid} (holds a value computed from this seal's proof, not the file's fingerprint)"
+                                    class="font-mono underline hover:text-[var(--text)]"
+                                    data-testid="seal-tx-link"
+                                >{a.txid.slice(0, 8)}…{a.txid.slice(-4)}</a>
+                            </p>
+                        {/if}
                     </li>
                 {/each}
             </ul>

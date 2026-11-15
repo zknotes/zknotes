@@ -17,6 +17,7 @@ import { FileLifecycle } from "$lib/core/utils/file-lifecycle";
 import { ZipStreamWriter } from "$lib/core/utils/zip-stream";
 import { decryptChunkTask } from "$lib/core/workers/crypto-rpc";
 import type { FilePayload } from "@zknotes/shared";
+import { txUrl } from "./explorer";
 import { buildCertificatePdf, LEGAL_NOTICE, LEGAL_NOTICE_TITLE } from "./seal-pdf";
 import type { SealView } from "./seal-service";
 
@@ -76,6 +77,7 @@ export function verifyText(view: SealView, fileEntry: string | null): string {
         '   "check that Bitcoin block N has merkleroot X". Look up block N on any public Bitcoin',
         "   block explorer: its Merkle root must be exactly X.",
         `   Block height(s): ${view.blocks.join(", ")}`,
+        ...anchorLines(view),
         "",
         "If all three steps succeed, a file with exactly these bytes existed before the time of",
         "the earliest of those blocks, which any block explorer shows (a block's time is set by its",
@@ -86,6 +88,31 @@ export function verifyText(view: SealView, fileEntry: string | null): string {
         ...LEGAL_NOTICE.map((p) => wrap(p, 78)),
         "",
     ].join("\n");
+}
+
+/**
+ * The public record behind each anchor, as an optional look. It adds nothing to the proof: step 3
+ * already checks the whole path, and the explorer is only a signpost to where the path ends.
+ */
+function anchorLines(view: SealView): string[] {
+    if (view.anchors.length === 0) return [];
+    const lines = [
+        "",
+        "   To see where the proof is recorded: each anchor is a Bitcoin transaction made by a",
+        "   timestamp calendar. Its OP_RETURN output holds the 32-byte value shown below. That",
+        "   value is computed from manifest.json along the proof's path ('ots info",
+        "   manifest.json.ots' prints the whole path). It is NOT the file's fingerprint, which",
+        "   is never published; one transaction covers many seals at once. Any block explorer",
+        "   shows the same transaction for the same id; links:",
+    ];
+    for (const a of view.anchors) {
+        lines.push(
+            `     Block ${a.height}, transaction ${a.txid}`,
+            `       ${txUrl(a.txid)}`,
+            `       OP_RETURN: ${a.opReturn}`,
+        );
+    }
+    return lines;
 }
 
 function wrap(text: string, width: number): string {

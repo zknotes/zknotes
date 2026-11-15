@@ -38,6 +38,8 @@ import {
     type SealManifest,
 } from "./manifest";
 import {
+    type BitcoinAnchor,
+    bitcoinAnchors,
     bitcoinHeights,
     createSealTree,
     fromHex,
@@ -91,6 +93,12 @@ export type SealView = {
     manifest: SealManifest;
     /** Block heights the proof reaches; empty while pending. */
     blocks: number[];
+    /**
+     * The calendars' Bitcoin transactions the proof passes through, earliest block first; derived
+     * from the proof, never stored. Empty while pending, or if a calendar's transaction is not
+     * recognized (the certificate then names only the block).
+     */
+    anchors: BitcoinAnchor[];
 };
 
 export class SealError extends Error {
@@ -268,6 +276,7 @@ export async function sealFile(
         record,
         manifest,
         blocks: [],
+        anchors: [],
     };
 }
 
@@ -296,6 +305,7 @@ async function decryptRow(row: SealWire): Promise<SealView | null> {
             record,
             manifest,
             blocks: bitcoinHeights(proof.timestamp),
+            anchors: bitcoinAnchors(proof.timestamp),
         };
     } catch {
         // A record this vault cannot open (or one that does not parse) is not shown as a proof.
@@ -414,7 +424,13 @@ export async function upgradeOne(view: SealView): Promise<SealView> {
         confirmed_at: new Date().toISOString(),
     };
     await storeRecord(view.id, "confirmed", record);
-    const confirmed: SealView = { ...view, state: "confirmed", record, blocks };
+    const confirmed: SealView = {
+        ...view,
+        state: "confirmed",
+        record,
+        blocks,
+        anchors: bitcoinAnchors(proof.timestamp),
+    };
     try {
         return await resolveBlockTime(confirmed);
     } catch {

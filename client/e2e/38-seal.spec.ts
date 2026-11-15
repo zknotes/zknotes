@@ -63,6 +63,15 @@ test.describe("Seal — proof of existence", () => {
             "data-source",
             "confirmation",
         );
+        // Spec 171: the transaction the proof passes through, linked to a public explorer.
+        const txLink = section.getByTestId("seal-tx-link");
+        await expect(txLink).toHaveAttribute(
+            "href",
+            /^https:\/\/mempool\.space\/tx\/[0-9a-f]{64}$/,
+        );
+        await expect(txLink).toHaveAttribute("rel", "noopener noreferrer");
+        await expect(txLink).toHaveAttribute("target", "_blank");
+        const txid = ((await txLink.getAttribute("href")) as string).split("/").pop() as string;
 
         await section.getByTestId("seal-export").click();
         const downloadPromise = page.waitForEvent("download");
@@ -79,6 +88,9 @@ test.describe("Seal — proof of existence", () => {
             .digest("hex");
         expect(Buffer.from(zip[name] as Uint8Array).equals(content)).toBe(true);
         expect(fileHash).toBe(manifest.content_sha256);
-        expect(Buffer.from(zip["VERIFY.txt"] as Uint8Array).toString()).toContain(fileHash);
+        const verify = Buffer.from(zip["VERIFY.txt"] as Uint8Array).toString();
+        expect(verify).toContain(fileHash);
+        expect(verify).toContain(`Block 900123, transaction ${txid}`);
+        expect(verify).toContain(`https://mempool.space/tx/${txid}`);
     });
 });

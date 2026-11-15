@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+### Added
+
+- A sealed file's certificate and its seal in the app now show where the proof is recorded: for
+  each anchor, the Bitcoin transaction and block, linked to a public block explorer, and the
+  32-byte value the transaction's OP_RETURN output holds. That value is computed from the seal's
+  manifest along the proof; the file's fingerprint itself is never published, so no explorer can
+  show it. The certificate says so.
+
 ## [0.4.0] - 2026-11-14
 
 ### Added

@@ -4,6 +4,7 @@
  *
  * jsPDF is loaded only here, on demand, so it never reaches the main bundle.
  */
+import { txUrl } from "./explorer";
 import { existedBefore, type SealView } from "./seal-service";
 
 /** The standard PDF fonts cover Latin-1 only; anything else would print as garbage. */
@@ -30,9 +31,18 @@ export async function buildCertificatePdf(view: SealView): Promise<Uint8Array> {
     const { jsPDF } = await import("jspdf");
     const doc = new jsPDF({ unit: "pt", format: "a4" });
     const left = 56;
+    const top = 72;
     const width = doc.internal.pageSize.getWidth() - left * 2;
-    let y = 72;
+    const bottom = doc.internal.pageSize.getHeight() - 56;
+    let y = top;
 
+    /** Starts a new page when the next `height` points would run past the bottom margin. */
+    const room = (height: number) => {
+        if (y + height > bottom) {
+            doc.addPage();
+            y = top;
+        }
+    };
     const line = (
         text: string,
         opts: { size?: number; bold?: boolean; mono?: boolean; gap?: number } = {},
@@ -40,8 +50,23 @@ export async function buildCertificatePdf(view: SealView): Promise<Uint8Array> {
         doc.setFont(opts.mono ? "courier" : "helvetica", opts.bold ? "bold" : "normal");
         doc.setFontSize(opts.size ?? 10);
         const lines = doc.splitTextToSize(latin1(text), width) as string[];
+        const height = lines.length * (opts.size ?? 10) * 1.35;
+        room(height);
         doc.text(lines, left, y);
-        y += lines.length * (opts.size ?? 10) * 1.35 + (opts.gap ?? 4);
+        y += height + (opts.gap ?? 4);
+    };
+    /** One clickable line; a URL is ASCII and short enough for one line at this size. */
+    const link = (text: string, url: string, size = 8) => {
+        doc.setFont("courier", "normal");
+        doc.setFontSize(size);
+        room(size * 1.35);
+        doc.textWithLink(text, left, y, { url });
+        y += size * 1.35 + 2;
+    };
+    /** A heading kept on the same page as the first `keep` points of what follows it. */
+    const heading = (text: string, size: number, keep: number) => {
+        room(size * 1.35 + keep);
+        line(text, { size, bold: true, gap: 6 });
     };
     const field = (label: string, value: string, mono = false) => {
         line(label, { size: 8, bold: true, gap: 1 });
@@ -78,15 +103,34 @@ export async function buildCertificatePdf(view: SealView): Promise<Uint8Array> {
             { size: 8, gap: 8 },
         );
     }
+    if (view.anchors.length > 0) {
+        y += 2;
+        heading("Where the proof is recorded", 11, 70);
+        line(
+            "Each anchor is a Bitcoin transaction made by a timestamp calendar. Its OP_RETURN output holds a value computed from manifest.json along the proof's path, not the file's fingerprint, which is never published. Any block explorer shows it by its id; each id below links to mempool.space.",
+            { size: 8, gap: 5 },
+        );
+        for (const a of view.anchors) {
+            link(`Block ${a.height.toLocaleString("en-US")}  tx ${a.txid}`, txUrl(a.txid));
+            line(`OP_RETURN ${a.opReturn}`, { size: 8, mono: true, gap: 4 });
+        }
+    }
     y += 6;
-    line("How to check this certificate", { size: 12, bold: true, gap: 6 });
+    heading("How to check this certificate", 12, 60);
     line(
         "The archive this certificate came with holds manifest.json, manifest.json.ots and VERIFY.txt. VERIFY.txt lists the three steps, using only free, standard tools. No account with ZKnotes and no ZKnotes server is needed. The file's SHA-256 must equal content_sha256 in manifest.json, and the OpenTimestamps proof manifest.json.ots must verify against manifest.json.",
         { gap: 16 },
     );
 
-    line(LEGAL_NOTICE_TITLE, { size: 11, bold: true, gap: 6 });
-    for (const p of LEGAL_NOTICE) line(p, { size: 9, gap: 6 });
+    // The notice is kept whole: it either fits under the rest or starts the next page.
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    const noticeHeight = LEGAL_NOTICE.reduce(
+        (sum, p) => sum + (doc.splitTextToSize(latin1(p), width) as string[]).length * 9 * 1.35 + 5,
+        0,
+    );
+    heading(LEGAL_NOTICE_TITLE, 11, noticeHeight);
+    for (const p of LEGAL_NOTICE) line(p, { size: 9, gap: 5 });
 
     return new Uint8Array(doc.output("arraybuffer"));
 }
