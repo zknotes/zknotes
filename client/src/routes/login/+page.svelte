@@ -459,6 +459,17 @@ const unsyncedSummary = $derived.by(() => {
                     <a href={signupHref} class="text-brand-fg hover:text-brand-fg hover:underline font-medium transition-colors" data-testid="login-signup-link">Create one</a>
                 </p>
             {/if}
+
+            <!-- An instance with an account layer has two sign-ins that look alike, an email and a
+                 password each, and they take different passwords. This one says which it is and
+                 where the other lives. A self-host has no account origin, so the line is absent. -->
+            {#if accountManageUrl}
+                <p class="text-center text-xs text-[var(--text-muted)]" data-testid="login-account-hint">
+                    This signs you in to your vault, with your vault password. Plan, billing and
+                    email settings are in your account, which has its own password.
+                    <a href={accountManageUrl} class="whitespace-nowrap text-brand-fg hover:text-brand-fg hover:underline font-medium transition-colors" data-testid="login-account-link">Go to your account</a>
+                </p>
+            {/if}
             
         </form>
         <LegalFooter class="mt-6 text-center" />
