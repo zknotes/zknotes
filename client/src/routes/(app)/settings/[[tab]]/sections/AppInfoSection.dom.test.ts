@@ -70,6 +70,27 @@ describe("About — Verify this build", () => {
         expect(root.textContent).not.toContain("Verify this build");
     });
 
+    it("builds the public-site links from the instance's wwwUrl", async () => {
+        vi.mocked(loadInstancePublicConfig).mockResolvedValue({
+            wwwUrl: "https://zknotes.example",
+        });
+        const root = await render();
+
+        const hrefOf = (text: string) =>
+            [...root.querySelectorAll<HTMLAnchorElement>("a")].find((a) => a.textContent === text)
+                ?.href;
+        expect(hrefOf("How it works")).toBe("https://zknotes.example/security");
+        expect(hrefOf("Privacy")).toBe("https://zknotes.example/privacy");
+        expect(hrefOf("Terms")).toBe("https://zknotes.example/terms");
+    });
+
+    it("shows no public-site links when the instance names no wwwUrl", async () => {
+        vi.mocked(loadInstancePublicConfig).mockResolvedValue({});
+        const root = await render();
+
+        expect(root.textContent).not.toContain("How it works");
+    });
+
     it("links to the third-party notices that ship with the build", async () => {
         vi.mocked(loadInstancePublicConfig).mockResolvedValue({});
         const root = await render();

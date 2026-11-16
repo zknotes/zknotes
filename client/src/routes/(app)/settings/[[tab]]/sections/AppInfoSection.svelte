@@ -57,7 +57,7 @@ onMount(() => {
             <div class="flex gap-4 text-sm text-[var(--accent-color)]">
                 <a href="/help/changelog" class="hover:underline" id="about-changelog-btn">Changelog</a>
                 {#if wwwUrl}
-                    <a href="{wwwUrl}/about" target="_blank" rel="noopener noreferrer" class="hover:underline">How it works</a>
+                    <a href="{wwwUrl}/security" target="_blank" rel="noopener noreferrer" class="hover:underline">How it works</a>
                     <a href="{wwwUrl}/privacy" target="_blank" rel="noopener noreferrer" class="hover:underline">Privacy</a>
                     <a href="{wwwUrl}/terms" target="_blank" rel="noopener noreferrer" class="hover:underline">Terms</a>
                 {/if}
