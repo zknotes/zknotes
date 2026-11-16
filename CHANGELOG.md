@@ -12,6 +12,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
   32-byte value the transaction's OP_RETURN output holds. That value is computed from the seal's
   manifest along the proof; the file's fingerprint itself is never published, so no explorer can
   show it. The certificate says so.
+- On an instance that has separate accounts, the sign-in screen now says that it asks for your
+  vault password and links to your account, where plan, billing and email settings live and which
+  has its own password. The two sign-ins look alike, so it was easy to try the wrong password. A
+  self-hosted instance without accounts shows nothing new.
 
 ## [0.4.0] - 2026-11-14
 
