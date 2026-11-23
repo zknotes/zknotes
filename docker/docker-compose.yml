@@ -168,7 +168,7 @@ services:
   # the internal network; Caddy publishes it on STORAGE_DOMAIN (docker/sites/storage.caddy), which is
   # also S3_ENDPOINT, because browsers upload to it directly.
   garage:
-    image: dxflrs/garage:v2.4.1
+    image: dxflrs/garage:v2.5.0
     profiles: [storage]
     # --default-bucket / --default-access-key: Garage creates S3_BUCKET and the S3_ACCESS_KEY /
     # S3_SECRET_KEY pair on start, so nothing has to be set up by hand.
