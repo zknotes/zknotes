@@ -40,7 +40,9 @@ read:
 - file contents, image thumbnails and image dimensions;
 - icons, colours and the starred flag;
 - the earlier versions kept in note history;
-- the Vault Key and every Item Key, which the server holds only wrapped.
+- the record of each proof-of-existence seal: its manifest, which holds the file's SHA-256, type and
+  length, and its proof;
+- the Vault Key, every Item Key and every seal's key, which the server holds only wrapped.
 
 The search index is built on the device and kept there, encrypted; it never reaches the server.
 
@@ -57,22 +59,60 @@ Visible to whoever runs the server, because syncing, accounts and share links ca
   original's chunks; the storage each account uses;
 - the account's email address, when it was created and when it was last active (to within about
   five minutes), its KDF salt and parameters, and for each session the IP address and browser user
-  agent it signed in from; failed sign-ins, by account and source address;
+  agent it signed in from, when it started and when it was last used; failed sign-ins, by account
+  and source address; on a hosted service with terms of its own, which version of them the account
+  accepted and when;
 - **the password verifier**: an Argon2id hash of the Auth Key. Together with the salt and parameters
   it lets the operator try to guess a weak password offline, so the password is what protects the
   vault against the server — choose a long one. A share link's password is verified the same way;
 - for a share link: which item and attachments it shares, when it was created, when it expires, how
-  many views it allows and has had, when it was last viewed or revoked, whether it has a password
-  and how many wrong ones were tried. The attachments of a shared note download through presigned
-  object-storage URLs whose path contains the owner's account id, so a recipient can see that id;
-- the SHA-256 of a backup file you restore from (for a backup without its own passphrase, that is a
-  hash of the plaintext archive, so someone holding a copy of the file can confirm it is yours);
+  many views it allows and has had, when it was last viewed or revoked, whether it has a password,
+  how many wrong ones were tried and from which source addresses. The attachments of a shared note
+  download through presigned object-storage URLs whose path contains the owner's storage prefix, so
+  a recipient can see it. The prefix is a random value for an account created on 0.3.0 or later and
+  the account id itself for an older one; either way it is the same for all of an account's files,
+  so someone holding two such links can tell that they come from the same owner;
+- for a proof-of-existence seal: which file's content it seals, when it was created and last
+  updated, whether it is pending or confirmed, the size of its encrypted record, and how many seals
+  the account made in the last 24 hours. Making and confirming a seal also passes three things
+  through the server: a 32-byte commitment, the timestamp services' replies, and the heights of the
+  blocks the app asks about. The published server neither stores nor logs them, but whoever runs it
+  could. The commitment is a hash over the manifest and a random value, so it reveals neither the
+  file nor its SHA-256; together with the replies it does show where on the public ledger the seal
+  is anchored;
+- when you restore a backup: the SHA-256 of the backup file (for a backup without its own
+  passphrase, that is a hash of the plaintext archive, so someone holding a copy of the file can
+  confirm it is yours), the mode you chose, and for every item in the backup its id, type, parent
+  and encrypted size;
 - usage analytics, unless the operator turns them off with `ANALYTICS_DISABLED`: which accounts were
   active on which day, and daily totals per route (listed under "Server-side analytics" in
   [`server/.env.example`](server/.env.example));
 - error reports the app sends when a file preview fails (the error message and the file's id);
 - like any web service, the IP address, timing, user agent and full address of every request — and
   the address carries the ids of the notes, files and share links involved.
+
+### Who else is contacted
+
+Three things reach someone other than whoever runs the server.
+
+- **Object storage.** The browser uploads and downloads file contents directly, through presigned
+  URLs. With the built-in storage that is the same server. With an S3 provider of the operator's
+  choosing, that provider stores the encrypted chunks and sees their sizes, their paths (the
+  account's storage prefix and an id per file) and the address and timing of every browser that
+  sends or fetches them.
+- **Timestamp services and a block source, for proof-of-existence seals.** The server, not the
+  browser, sends a seal's 32-byte commitment to the OpenTimestamps calendars named in
+  `OTS_CALENDAR_URLS` (four public ones by default) and later asks them for the finished proof; it
+  fetches block headers by height from `OTS_BLOCK_SOURCE_URL` (blockstream.info by default). Those
+  services see the commitment or the height, the time, and the server's address, with a user agent
+  that names ZKnotes — not your address, and not which account asked. What a calendar commits to
+  the public ledger stays there for good and cannot be withdrawn; it is a hash that names neither
+  you nor the file. An empty `OTS_CALENDAR_URLS` turns sealing off on an instance. Both variables
+  are described in [`server/.env.example`](server/.env.example).
+- **A block explorer, only when you follow a link.** A seal's certificate and its panel in the app
+  link to mempool.space for the transaction and block that anchor it. Nothing is fetched until you
+  open such a link; when you do, the explorer sees your address and a transaction that the calendar
+  shares among many unrelated commitments.
 
 ## Where keys live
 
