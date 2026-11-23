@@ -77,7 +77,7 @@ services:
   # no shell (scratch-based), so there is no in-container healthcheck; garage_init's own retry loop
   # is what waits for it to come up.
   garage:
-    image: dxflrs/garage:v2.4.1
+    image: dxflrs/garage:v2.5.0
     command: /garage -c /etc/garage.toml server --single-node --default-bucket --default-access-key
     environment:
       GARAGE_DEFAULT_ACCESS_KEY: minioadmin
@@ -128,7 +128,7 @@ services:
 
   # ── Test Object Store (Garage, S3 compatible) ────────────────────────────────
   garage_test:
-    image: dxflrs/garage:v2.4.1
+    image: dxflrs/garage:v2.5.0
     command: /garage -c /etc/garage.toml server --single-node --default-bucket --default-access-key
     environment:
       GARAGE_DEFAULT_ACCESS_KEY: minioadmin
