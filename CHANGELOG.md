@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version
 
 ## [Unreleased]
 
+### Changed
+
+- `SECURITY.md` now also says what a proof-of-existence seal shows the server and the outside
+  services it contacts, what an S3 provider of the operator's choosing sees, what restoring a
+  backup sends, and that wrong share passwords are counted per source address. It corrects one
+  statement as well: the download links a share recipient gets carry the owner's account id only
+  for an account created before 0.3.0, and a random value otherwise.
+
 ## [0.5.0] - 2026-11-16
 
 ### Added
